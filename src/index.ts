@@ -5,7 +5,7 @@
 
 import TelegramBot from 'node-telegram-bot-api';
 import { AppState, MonitoringState, BotContext } from './types';
-import { loadConfig, CONFIG_FILE, TELEBOT_DIR } from './config';
+import { loadConfig, ensureSettings, CONFIG_FILE, TELEBOT_DIR } from './config';
 import { tmuxExists, tmuxRead } from './tmux';
 import { extractResponses, detectPermission } from './parser';
 import { splitMessage, normalizeForComparison } from './utils';
@@ -54,6 +54,7 @@ async function main(): Promise<void> {
   await ensureSingleInstance();
   console.log(`🔒 Instance unique (PID ${process.pid})`);
 
+  ensureSettings();
   const config = loadConfig();
   const TOKEN = config.TELEGRAM_BOT_TOKEN;
 
