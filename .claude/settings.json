@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(node:*)",
+      "Bash(cp * ~/.telebot/*)",
+      "Bash(chmod +x:*)",
+      "Bash(git:*)",
+      "Bash(tmux:*)",
+      "Bash(curl:*)",
+      "Bash(mkdir:*)"
+    ],
+    "deny": []
+  }
+}

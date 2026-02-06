@@ -1,0 +1,931 @@
+#!/usr/bin/env bash
+#
+# Telebot - CLI pour le bot Telegram Claude Code
+# Usage: telebot [start|stop|status|config|logs|uninstall]
+#
+
+TELEBOT_DIR="$HOME/.telebot"
+CONFIG_FILE="$TELEBOT_DIR/config.env"
+PID_FILE="$TELEBOT_DIR/bot.pid"
+LOG_FILE="$TELEBOT_DIR/bot.log"
+BOT_SCRIPT="$TELEBOT_DIR/bot.js"
+CLAUDE_DIR="$TELEBOT_DIR/.claude"
+SKILLS_DIR="$CLAUDE_DIR/skills"
+
+source "$TELEBOT_DIR/lib/platform.sh"
+source "$TELEBOT_DIR/lib/ui.sh"
+source "$TELEBOT_DIR/lib/docs.sh"
+source "$TELEBOT_DIR/lib/skills.sh"
+
+get_version() {
+    grep '"version"' "$TELEBOT_DIR/package.json" 2>/dev/null | cut -d'"' -f4
+}
+
+logo() {
+    _logo_impl "$(get_version)"
+}
+
+UPDATE_CHECK_FILE="${TEMP_DIR}/telebot_update_$$"
+
+check_setup_complete() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        return 1
+    fi
+
+    local user_id
+    local setup_code
+    user_id=$(grep "TELEGRAM_USER_ID=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2)
+    setup_code=$(grep "SETUP_CODE=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2)
+
+    if [ -z "$user_id" ] || [ -n "$setup_code" ]; then
+        return 1
+    fi
+    return 0
+}
+
+get_setup_code() {
+    grep "SETUP_CODE=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2
+}
+
+show_activation_code() {
+    local code=$1
+    local spaced_code
+    spaced_code=$(echo "$code" | sed 's/./&   /g' | sed 's/   $//')
+
+    echo ""
+    echo "${C_CYAN}${C_BOLD}╔══════════════════════════════════════════════════════════╗${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                                                          ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                    ${C_BOLD}CODE D'ACTIVATION${C_RESET}                     ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                                                          ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}            ${C_BOLD}${spaced_code}${C_RESET}                 ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                                                          ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}               ${C_DIM}Entre ce code dans Telegram${C_RESET}                ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                                                          ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}╚══════════════════════════════════════════════════════════╝${C_RESET}"
+    echo ""
+}
+
+show_setup_required_banner() {
+    local setup_code
+    setup_code=$(get_setup_code)
+
+    echo ""
+    echo "${C_CYAN}${C_BOLD}╔════════════════════════════════════════════════════════════════════╗${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                    ${C_YELLOW}${C_BOLD}⚡ PREMIERS PAS${C_RESET}                               ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}╚════════════════════════════════════════════════════════════════════╝${C_RESET}"
+    echo ""
+    echo "  ${C_DIM}Active ton bot en 3 étapes :${C_RESET}"
+    echo ""
+    echo "    ${C_GREEN}1.${C_RESET} ${C_BOLD}Démarre le bot${C_RESET} ${C_DIM}(option ci-dessous)${C_RESET}"
+    echo "    ${C_GREEN}2.${C_RESET} ${C_BOLD}Ouvre Telegram${C_RESET} et trouve ton bot"
+    echo "    ${C_GREEN}3.${C_RESET} ${C_BOLD}Envoie le code${C_RESET} affiché ici"
+    echo ""
+
+    if [ -n "$setup_code" ]; then
+        local spaced_code
+        spaced_code=$(echo "$setup_code" | sed 's/./&   /g' | sed 's/   $//')
+        echo "  ${C_DIM}Ton code :${C_RESET}  ${C_CYAN}${C_BOLD}${spaced_code}${C_RESET}"
+    else
+        echo "  ${C_RED}Code non trouvé${C_RESET} ${C_DIM}- relance l'installation${C_RESET}"
+    fi
+    echo ""
+}
+
+check_update_async() {
+    (
+        REPO="https://raw.githubusercontent.com/anthonymarandon/telebot/main"
+        REMOTE=$(curl -fsSL --connect-timeout 3 "$REPO/package.json" 2>/dev/null | grep '"version"' | cut -d'"' -f4)
+        if [ -n "$REMOTE" ]; then
+            echo "$REMOTE" > "$UPDATE_CHECK_FILE"
+        fi
+    ) &
+}
+
+get_update_status() {
+    if [ -f "$UPDATE_CHECK_FILE" ]; then
+        local remote
+        local local_ver
+        remote=$(cat "$UPDATE_CHECK_FILE" 2>/dev/null)
+        local_ver=$(grep '"version"' "$TELEBOT_DIR/package.json" 2>/dev/null | cut -d'"' -f4)
+        if [ -n "$remote" ] && [ -n "$local_ver" ] && [ "$local_ver" != "$remote" ]; then
+            echo "$remote"
+        fi
+    fi
+}
+
+show_update_banner() {
+    local remote_ver
+    remote_ver=$(get_update_status)
+    if [ -n "$remote_ver" ]; then
+        local local_ver
+        local_ver=$(grep '"version"' "$TELEBOT_DIR/package.json" 2>/dev/null | cut -d'"' -f4)
+        echo ""
+        echo "  ${C_YELLOW}📦 Nouvelle version disponible : v$local_ver → v$remote_ver${C_RESET}"
+    fi
+}
+
+cleanup_update_check() {
+    rm -f "$UPDATE_CHECK_FILE" 2>/dev/null
+}
+
+check_update_silent() {
+    REPO="https://raw.githubusercontent.com/anthonymarandon/telebot/main"
+    REMOTE_VERSION=$(curl -fsSL --connect-timeout 2 "$REPO/package.json" 2>/dev/null | grep '"version"' | cut -d'"' -f4)
+    LOCAL_VERSION=$(grep '"version"' "$TELEBOT_DIR/package.json" 2>/dev/null | cut -d'"' -f4)
+
+    if [ -n "$REMOTE_VERSION" ] && [ -n "$LOCAL_VERSION" ] && [ "$LOCAL_VERSION" != "$REMOTE_VERSION" ]; then
+        echo ""
+        echo "📦 Mise à jour disponible: v$LOCAL_VERSION → v$REMOTE_VERSION"
+        echo "   Lance: telebot update"
+        echo ""
+    fi
+}
+
+start() {
+    if [ ! -f "$BOT_SCRIPT" ]; then
+        echo "❌ Bot non installé. Relance l'installation."
+        exit 1
+    fi
+
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "❌ Config manquante: $CONFIG_FILE"
+        exit 1
+    fi
+
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "⚠️  Bot déjà en cours (PID $PID)"
+            exit 0
+        fi
+        rm -f "$PID_FILE"
+    fi
+
+    cd "$TELEBOT_DIR" || return 1
+    TELEBOT_DIR="$TELEBOT_DIR" nohup node bot.js >> "$LOG_FILE" 2>&1 &
+    echo $! > "$PID_FILE"
+
+    echo "✅ Bot démarré (PID $!)"
+    echo "   Logs: $LOG_FILE"
+
+    check_update_silent &
+}
+
+stop() {
+    if [ ! -f "$PID_FILE" ]; then
+        echo "⚫ Bot non actif"
+        exit 0
+    fi
+
+    PID=$(cat "$PID_FILE")
+    if kill "$PID" 2>/dev/null; then
+        rm -f "$PID_FILE"
+        echo "🛑 Bot arrêté (PID $PID)"
+    else
+        rm -f "$PID_FILE"
+        echo "⚫ Bot n'était pas actif"
+    fi
+}
+
+status() {
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "✅ Bot actif (PID $PID)"
+
+            if tmux has-session -t claude 2>/dev/null; then
+                echo "📟 Session Claude active"
+            else
+                echo "⚫ Session Claude inactive"
+            fi
+            exit 0
+        fi
+        rm -f "$PID_FILE"
+    fi
+    echo "⚫ Bot inactif"
+}
+
+config() {
+    ${EDITOR:-nano} "$CONFIG_FILE"
+}
+
+prompt() {
+    ${EDITOR:-nano} "$TELEBOT_DIR/CLAUDE.md"
+}
+
+logs() {
+    if [ -f "$LOG_FILE" ]; then
+        tail -50 "$LOG_FILE"
+    else
+        echo "Pas de logs"
+    fi
+}
+
+update() {
+    clear
+    logo
+    hr
+
+    section "📦 Mise à jour"
+
+    REPO="https://raw.githubusercontent.com/anthonymarandon/telebot/main"
+    LOCAL_VERSION=$(grep '"version"' "$TELEBOT_DIR/package.json" 2>/dev/null | cut -d'"' -f4)
+
+    TEMP_VERSION=$(mktemp)
+
+    check_versions() {
+        curl -fsSL --connect-timeout 5 "$REPO/package.json" 2>/dev/null | grep '"version"' | cut -d'"' -f4 > "$TEMP_VERSION"
+    }
+    check_versions &
+    spinner $! "Vérification des mises à jour..."
+
+    REMOTE_VERSION=$(cat "$TEMP_VERSION" 2>/dev/null)
+    rm -f "$TEMP_VERSION"
+
+    if [ -z "$REMOTE_VERSION" ]; then
+        echo ""
+        fail "Impossible de vérifier les mises à jour"
+        echo "  ${C_DIM}Vérifiez votre connexion ou réessayez plus tard.${C_RESET}"
+        echo ""
+        pause_return 3
+        return 1  # Erreur, pas de redémarrage
+    fi
+
+    echo ""
+    echo "    Installée:   ${C_DIM}v$LOCAL_VERSION${C_RESET}"
+    echo "    Disponible:  ${C_CYAN}v$REMOTE_VERSION${C_RESET}"
+    echo ""
+
+    if [ "$LOCAL_VERSION" = "$REMOTE_VERSION" ]; then
+        hr
+        echo ""
+        success "Tu as la dernière version !"
+        pause_return 2
+        return 1  # Pas de mise à jour nécessaire
+    fi
+
+    hr
+    echo ""
+    menu "  Mettre à jour vers v$REMOTE_VERSION ?" "Oui" "Non" "Retour au menu"
+    local choice=$?
+    if [ $choice -ne 0 ]; then
+        return 1  # Mise à jour annulée
+    fi
+
+    echo ""
+
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        kill "$PID" 2>/dev/null
+        rm -f "$PID_FILE"
+        success "Bot arrêté"
+    fi
+
+    download_update() {
+        curl -fsSL "$REPO/bot.js" -o "$TELEBOT_DIR/bot.js"
+        curl -fsSL "$REPO/package.json" -o "$TELEBOT_DIR/package.json"
+        curl -fsSL "$REPO/telebot" -o "$TELEBOT_DIR/telebot"
+        curl -fsSL "$REPO/CHANGELOG.md" -o "$TELEBOT_DIR/CHANGELOG.md"
+        chmod +x "$TELEBOT_DIR/telebot"
+        mkdir -p "$TELEBOT_DIR/lib"
+        curl -fsSL "$REPO/lib/platform.sh" -o "$TELEBOT_DIR/lib/platform.sh"
+        curl -fsSL "$REPO/lib/ui.sh" -o "$TELEBOT_DIR/lib/ui.sh"
+        curl -fsSL "$REPO/lib/docs.sh" -o "$TELEBOT_DIR/lib/docs.sh"
+        curl -fsSL "$REPO/lib/skills.sh" -o "$TELEBOT_DIR/lib/skills.sh"
+        mkdir -p "$TELEBOT_DIR/dist"
+        curl -fsSL "$REPO/dist/index.js" -o "$TELEBOT_DIR/dist/index.js"
+        curl -fsSL "$REPO/dist/types.js" -o "$TELEBOT_DIR/dist/types.js"
+        curl -fsSL "$REPO/dist/config.js" -o "$TELEBOT_DIR/dist/config.js"
+        curl -fsSL "$REPO/dist/tmux.js" -o "$TELEBOT_DIR/dist/tmux.js"
+        curl -fsSL "$REPO/dist/parser.js" -o "$TELEBOT_DIR/dist/parser.js"
+        curl -fsSL "$REPO/dist/utils.js" -o "$TELEBOT_DIR/dist/utils.js"
+        curl -fsSL "$REPO/dist/commands.js" -o "$TELEBOT_DIR/dist/commands.js"
+        curl -fsSL "$REPO/dist/platform.js" -o "$TELEBOT_DIR/dist/platform.js"
+    }
+    step_run "Téléchargement..." download_update
+
+    install_update_deps() {
+        cd "$TELEBOT_DIR" && npm install --silent
+    }
+    step_run "Installation des dépendances..." install_update_deps
+
+    echo ""
+    echo "${C_CYAN}${C_BOLD}╔═════════════════════════════════════════╗${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                                         ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}  ${C_GREEN}✔ Mise à jour terminée (v$REMOTE_VERSION)${C_RESET}     ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                                         ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}╚═════════════════════════════════════════╝${C_RESET}"
+    echo ""
+
+    menu "📝 Mettre à jour les instructions Claude ?" "Non, garder mes personnalisations" "Oui, mettre à jour"
+    if [ $? -eq 1 ]; then
+        curl -fsSL "$REPO/CLAUDE.md.default" -o "$TELEBOT_DIR/CLAUDE.md"
+        success "Instructions Claude mises à jour"
+    fi
+
+    echo ""
+    echo "  ${C_CYAN}⟳${C_RESET} Redémarrage du CLI..."
+    sleep 1
+}
+
+uninstall() {
+    clear
+    logo
+    hr
+    section "🗑️  Désinstallation"
+
+    echo "  ${C_YELLOW}⚠️  Cette action va supprimer :${C_RESET}"
+    echo ""
+    echo "     • ~/.telebot/"
+    echo "     • Configuration et logs"
+    echo "     • Commande telebot"
+    echo ""
+    echo "  ${C_RED}Cette action est irréversible.${C_RESET}"
+    echo ""
+    hr
+    echo ""
+
+    if menu "  Confirmer la suppression?" "Annuler (retour au menu)" "Supprimer définitivement"; then
+        return 0
+    fi
+
+    echo ""
+
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        kill "$PID" 2>/dev/null
+        rm -f "$PID_FILE"
+        success "Bot arrêté"
+    fi
+
+    if [ "$(count_tmux_claude_sessions)" -gt 0 ]; then
+        kill_all_tmux_claude
+        success "Session(s) Claude fermée(s)"
+    fi
+
+    if [ -d "$TELEBOT_DIR" ]; then
+        rm -rf "$TELEBOT_DIR"
+        success "Fichiers supprimés"
+    fi
+
+    if [ -L "$HOME/.local/bin/telebot" ]; then
+        rm -f "$HOME/.local/bin/telebot"
+        success "Commande supprimée"
+    fi
+
+    echo ""
+    echo "${C_CYAN}${C_BOLD}╔═════════════════════════════════════════╗${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                                         ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}            ${C_CYAN}👋 À bientôt !${C_RESET}               ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                                         ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}      Telebot a été désinstallé.         ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}║${C_RESET}                                         ${C_CYAN}${C_BOLD}║${C_RESET}"
+    echo "${C_CYAN}${C_BOLD}╚═════════════════════════════════════════╝${C_RESET}"
+    echo ""
+    sleep 2
+}
+
+count_tmux_claude_sessions() {
+    local count
+    count=$(tmux list-sessions 2>/dev/null | grep -c "claude" 2>/dev/null) || true
+    echo "${count:-0}"
+}
+
+kill_all_tmux_claude() {
+    tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "claude" | while read -r session; do
+        tmux kill-session -t "$session" 2>/dev/null
+    done
+}
+
+is_bot_active() {
+    [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+}
+
+has_tmux_sessions() {
+    [ "$(count_tmux_claude_sessions)" -gt 0 ]
+}
+
+MENU_OPTIONS=()
+MENU_ACTIONS=()
+SELECTED_ACTION=""
+
+build_menu() {
+    MENU_OPTIONS=()
+    MENU_ACTIONS=()
+
+    if is_bot_active; then
+        MENU_OPTIONS+=("Arrêter le bot")
+        MENU_ACTIONS+=("stop")
+    else
+        MENU_OPTIONS+=("Démarrer le bot")
+        MENU_ACTIONS+=("start")
+    fi
+
+    if has_tmux_sessions; then
+        MENU_OPTIONS+=("Stopper sessions tmux")
+        MENU_ACTIONS+=("kill_tmux")
+    fi
+
+    MENU_OPTIONS+=("Mettre à jour")
+    MENU_ACTIONS+=("update")
+
+    MENU_OPTIONS+=("Voir les logs")
+    MENU_ACTIONS+=("logs")
+
+    MENU_OPTIONS+=("Éditer la configuration")
+    MENU_ACTIONS+=("config")
+
+    MENU_OPTIONS+=("Éditer les instructions Claude")
+    MENU_ACTIONS+=("prompt")
+
+    MENU_OPTIONS+=("Nouveautés")
+    MENU_ACTIONS+=("changelog")
+
+    MENU_OPTIONS+=("Gérer les skills")
+    MENU_ACTIONS+=("skills")
+
+    MENU_OPTIONS+=("Aide / FAQ")
+    MENU_ACTIONS+=("help")
+
+    MENU_OPTIONS+=("Documentation")
+    MENU_ACTIONS+=("docs")
+
+    MENU_OPTIONS+=("Réinitialiser la configuration")
+    MENU_ACTIONS+=("reset_config")
+
+    MENU_OPTIONS+=("Désinstaller")
+    MENU_ACTIONS+=("uninstall")
+
+    MENU_OPTIONS+=("Quitter")
+    MENU_ACTIONS+=("quit")
+}
+
+format_duration() {
+    local seconds=$1
+    if [ "$seconds" -lt 60 ]; then
+        echo "${seconds}s"
+    elif [ "$seconds" -lt 3600 ]; then
+        echo "$((seconds / 60))m"
+    elif [ "$seconds" -lt 86400 ]; then
+        local hours=$((seconds / 3600))
+        local mins=$(((seconds % 3600) / 60))
+        echo "${hours}h${mins}m"
+    else
+        local days=$((seconds / 86400))
+        local hours=$(((seconds % 86400) / 3600))
+        echo "${days}j${hours}h"
+    fi
+}
+
+get_status() {
+    local bot_label="⚫ OFF"
+    local claude_label="⚫ OFF"
+    local bot_uptime=""
+    local last_log=""
+    local tmux_count
+    tmux_count=$(count_tmux_claude_sessions)
+
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        bot_label="${C_GREEN}✅ ON${C_RESET}"
+
+        if [ -f "$PID_FILE" ]; then
+            local pid_time
+            pid_time=$(get_file_mtime "$PID_FILE")
+            if [ -n "$pid_time" ]; then
+                local now
+                now=$(date +%s)
+                local uptime_sec=$((now - pid_time))
+                bot_uptime=" ($(format_duration $uptime_sec))"
+            fi
+        fi
+    else
+        bot_label="${C_DIM}⚫ OFF${C_RESET}"
+    fi
+
+    if [ "$tmux_count" -eq 1 ]; then
+        claude_label="${C_GREEN}✅ ON${C_RESET}"
+    elif [ "$tmux_count" -gt 1 ]; then
+        claude_label="${C_YELLOW}⚠️ ${tmux_count}${C_RESET}"
+    else
+        claude_label="${C_DIM}⚫ OFF${C_RESET}"
+    fi
+
+    if [ -f "$LOG_FILE" ]; then
+        local log_time
+        log_time=$(get_file_mtime "$LOG_FILE")
+        if [ -n "$log_time" ]; then
+            local now
+            now=$(date +%s)
+            local log_age=$((now - log_time))
+            if [ "$log_age" -lt 300 ]; then
+                last_log="${C_GREEN}< 5m${C_RESET}"
+            elif [ "$log_age" -lt 3600 ]; then
+                last_log="${C_DIM}$(format_duration $log_age)${C_RESET}"
+            else
+                last_log="${C_DIM}> 1h${C_RESET}"
+            fi
+        fi
+    fi
+
+    echo "  ${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    printf "  ${C_DIM}│${C_RESET} 🤖 Bot: %s%s" "$bot_label" "${C_DIM}$bot_uptime${C_RESET}"
+    printf " ${C_DIM}│${C_RESET} 📟 Claude: %s" "$claude_label"
+    if [ -n "$last_log" ]; then
+        printf " ${C_DIM}│${C_RESET} 📝 $last_log"
+    fi
+    echo " ${C_DIM}│${C_RESET}"
+    echo "  ${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+}
+
+draw_menu() {
+    build_menu
+
+    local selected=0
+    local count=${#MENU_OPTIONS[@]}
+    local box_width=35
+    local refresh_timeout=30
+
+    tput civis 2>/dev/null || true
+
+    while true; do
+        for i in "${!MENU_OPTIONS[@]}"; do
+            tput el 2>/dev/null || printf "\033[K"
+            if [ "$i" -eq "$selected" ]; then
+                local label="${MENU_OPTIONS[$i]}"
+                local padding=$((box_width - ${#label} - 4))
+                echo "  ${C_CYAN}┌$(repeat_char '─' $box_width)┐${C_RESET}"
+                echo "  ${C_CYAN}│${C_RESET} ${C_CYAN}▶${C_RESET} ${C_BOLD}${label}${C_RESET}$(repeat_char ' ' $padding)${C_CYAN}│${C_RESET}"
+                echo "  ${C_CYAN}└$(repeat_char '─' $box_width)┘${C_RESET}"
+            else
+                echo "     ${C_DIM}${MENU_OPTIONS[$i]}${C_RESET}"
+            fi
+        done
+
+        echo ""
+        hr
+        echo " ${C_DIM}[↑↓] Naviguer  [Entrée] Valider  [S]tart  [L]ogs  [D]ocs  [H]elp  [Q]uitter${C_RESET}"
+
+        IFS= read_key -rsn1 -t $refresh_timeout key
+        local read_status=$?
+
+        if [ "$read_status" -gt 128 ] || { [ -z "$key" ] && [ "$read_status" -ne 0 ]; }; then
+            SELECTED_ACTION="refresh"
+            tput cnorm 2>/dev/null || true
+            return
+        fi
+
+        if [[ $key == $'\x1b' ]]; then
+            read_key -rsn2 -t "$READ_TIMEOUT" key
+            case $key in
+                '[A') ((selected--)); [ $selected -lt 0 ] && selected=$((count - 1)) ;;
+                '[B') ((selected++)); [ "$selected" -ge "$count" ] && selected=0 ;;
+            esac
+        elif [[ $key == "" ]]; then
+            break
+        elif [[ $key == "q" || $key == "Q" ]]; then
+            SELECTED_ACTION="quit"
+            tput cnorm 2>/dev/null || true
+            return
+        elif [[ $key == "s" || $key == "S" ]]; then
+            if is_bot_active; then
+                SELECTED_ACTION="stop"
+            else
+                SELECTED_ACTION="start"
+            fi
+            tput cnorm 2>/dev/null || true
+            return
+        elif [[ $key == "l" || $key == "L" ]]; then
+            SELECTED_ACTION="logs"
+            tput cnorm 2>/dev/null || true
+            return
+        elif [[ $key == "h" || $key == "H" ]]; then
+            SELECTED_ACTION="help"
+            tput cnorm 2>/dev/null || true
+            return
+        elif [[ $key == "d" || $key == "D" ]]; then
+            SELECTED_ACTION="docs"
+            tput cnorm 2>/dev/null || true
+            return
+        elif [[ $key == "u" || $key == "U" ]]; then
+            SELECTED_ACTION="update"
+            tput cnorm 2>/dev/null || true
+            return
+        fi
+        # +2 encadré sélection + 3 footer
+        local lines_to_go_up=$((count + 5))
+        tput cuu "$lines_to_go_up" 2>/dev/null || printf "\033[%sA" "$lines_to_go_up"
+    done
+
+    tput cnorm 2>/dev/null || true
+    SELECTED_ACTION="${MENU_ACTIONS[$selected]}"
+}
+
+do_start_interactive() {
+    echo ""
+
+    if ! check_setup_complete; then
+        local setup_code
+        setup_code=$(get_setup_code)
+
+        echo "  ${C_YELLOW}📱 Activation requise${C_RESET}"
+        echo ""
+
+        local spaced_code
+        spaced_code=$(echo "$setup_code" | sed 's/./&   /g' | sed 's/   $//')
+        echo "  ${C_DIM}Ton code d'activation :${C_RESET}"
+        echo ""
+        echo "      ${C_CYAN}${C_BOLD}${spaced_code}${C_RESET}"
+        echo ""
+
+        if copy_to_clipboard "$setup_code"; then
+            success "Code copié dans le presse-papiers"
+        fi
+
+        echo ""
+        hr
+        echo ""
+    fi
+
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "  ${C_YELLOW}⚠${C_RESET}  Bot déjà en cours"
+    else
+        cd "$TELEBOT_DIR" || return 1
+        TELEBOT_DIR="$TELEBOT_DIR" nohup node bot.js >> "$LOG_FILE" 2>&1 &
+        echo $! > "$PID_FILE"
+        success "Bot démarré"
+    fi
+
+    if ! check_setup_complete; then
+        echo ""
+        echo "  ${C_DIM}📱 Ouvre Telegram et envoie le code à ton bot${C_RESET}"
+        echo ""
+        echo "  ${C_DIM}Appuie sur Entrée une fois activé...${C_RESET}"
+        read_key -rsn1
+
+        if check_setup_complete; then
+            echo ""
+            success "Bot activé avec succès !"
+            pause_return 2
+        else
+            echo ""
+            echo "  ${C_DIM}Pas encore activé - réessaie depuis Telegram${C_RESET}"
+            pause_return 3
+        fi
+    else
+        echo ""
+        echo "  ${C_DIM}📱 Ouvre Telegram et envoie /start${C_RESET}"
+        echo ""
+        pause_return 2
+    fi
+}
+
+do_stop_interactive() {
+    echo ""
+    if [ ! -f "$PID_FILE" ]; then
+        echo "  ${C_DIM}⚫ Bot déjà arrêté${C_RESET}"
+    else
+        PID=$(cat "$PID_FILE")
+        if kill "$PID" 2>/dev/null; then
+            rm -f "$PID_FILE"
+            success "Bot arrêté"
+        else
+            rm -f "$PID_FILE"
+            echo "  ${C_DIM}⚫ Bot n'était pas actif${C_RESET}"
+        fi
+    fi
+    if [ "$(count_tmux_claude_sessions)" -gt 0 ]; then
+        kill_all_tmux_claude
+        success "Session(s) Claude fermée(s)"
+    fi
+    echo ""
+    pause_return 2
+}
+
+do_kill_tmux_interactive() {
+    echo ""
+    local count
+    count=$(count_tmux_claude_sessions)
+
+    if [ "$count" -eq 0 ]; then
+        echo "  ${C_DIM}⚫ Aucune session tmux Claude active${C_RESET}"
+        echo ""
+        pause_return 2
+        return
+    fi
+
+    if [ "$count" -gt 1 ]; then
+        echo "  ${C_YELLOW}⚠️ Attention : $count sessions tmux détectées${C_RESET}"
+        echo "  ${C_DIM}(Une seule session devrait exister)${C_RESET}"
+    else
+        echo "  ${C_GREEN}📟 1 session tmux Claude active${C_RESET}"
+    fi
+    echo ""
+
+    tmux list-sessions 2>/dev/null | grep "claude" | while read -r session; do
+        echo "    ${C_DIM}• $session${C_RESET}"
+    done
+    echo ""
+
+    local prompt="Arrêter la session Claude ?"
+    [ "$count" -gt 1 ] && prompt="Arrêter toutes les sessions Claude ?"
+
+    if menu "  $prompt" "Oui, arrêter" "Non, annuler"; then
+        kill_all_tmux_claude
+        echo ""
+        success "Session(s) Claude arrêtée(s)"
+    fi
+    echo ""
+    pause_return 2
+}
+
+do_reset_config_interactive() {
+    clear
+    logo
+    hr
+    section "🔄 Réinitialiser la configuration"
+
+    echo "  ${C_YELLOW}⚠️  Cette action va :${C_RESET}"
+    echo ""
+    echo "     • Remplacer la configuration actuelle"
+    echo "     • Demander un nouveau token Telegram"
+    echo "     • Générer un nouveau code d'activation"
+    echo ""
+    hr
+    echo ""
+
+    if menu "  Continuer ?" "Annuler (retour au menu)" "Continuer"; then
+        return 0
+    fi
+
+    echo ""
+    hr
+    section "🔑 Nouveau token Telegram"
+
+    echo "  ${C_DIM}Crée un bot sur @BotFather et copie le token${C_RESET}"
+    echo "  ${C_DIM}Format : 123456789:ABCDEFghijklmnop...${C_RESET}"
+    echo ""
+
+    local NEW_TOKEN=""
+    while true; do
+        printf "  Token: "
+        read_key -r NEW_TOKEN
+
+        NEW_TOKEN=$(echo "$NEW_TOKEN" | tr -d ' \t\n\r')
+
+        if [ -z "$NEW_TOKEN" ]; then
+            echo ""
+            fail "Token requis"
+            echo ""
+            menu "  Que faire ?" "Réessayer" "Annuler"
+            if [ $? -eq 1 ]; then
+                return 0
+            fi
+            echo ""
+            continue
+        fi
+
+        if ! [[ "$NEW_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]{25,}$ ]]; then
+            echo ""
+            fail "Format de token invalide"
+            echo "  ${C_DIM}💡 Le token doit commencer par des chiffres puis :${C_RESET}"
+            echo ""
+            continue
+        fi
+
+        echo ""
+        echo "  ${C_DIM}Vérification du token...${C_RESET}"
+        local response
+        response=$(curl -fsSL --connect-timeout 5 "https://api.telegram.org/bot$NEW_TOKEN/getMe" 2>/dev/null)
+
+        if echo "$response" | grep -q '"ok":true'; then
+            local bot_name
+            bot_name=$(echo "$response" | grep -o '"first_name":"[^"]*"' | cut -d'"' -f4)
+            echo ""
+            success "Token valide"
+            [ -n "$bot_name" ] && echo "  ${C_DIM}Bot : @$bot_name${C_RESET}"
+            break
+        else
+            echo ""
+            fail "Token invalide ou réseau indisponible"
+            echo ""
+            menu "  Que faire ?" "Réessayer" "Annuler"
+            if [ $? -eq 1 ]; then
+                return 0
+            fi
+            echo ""
+        fi
+    done
+
+    echo ""
+    hr
+    echo ""
+
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if kill "$PID" 2>/dev/null; then
+            rm -f "$PID_FILE"
+            success "Bot arrêté"
+        else
+            rm -f "$PID_FILE"
+        fi
+    fi
+
+    if [ "$(count_tmux_claude_sessions)" -gt 0 ]; then
+        kill_all_tmux_claude
+        success "Session(s) Claude fermée(s)"
+    fi
+
+    SETUP_CODE=$(printf "%08d" $((RANDOM * RANDOM % 100000000)))
+
+    cat > "$CONFIG_FILE" << EOF
+TELEGRAM_BOT_TOKEN=$NEW_TOKEN
+TELEGRAM_USER_ID=
+SETUP_CODE=$SETUP_CODE
+EOF
+
+    success "Configuration enregistrée"
+
+    echo ""
+    hr
+    echo ""
+    echo "  ${C_GREEN}✔ Configuration réinitialisée${C_RESET}"
+    echo ""
+    echo "  ${C_DIM}Prochaines étapes :${C_RESET}"
+    echo "    1. Démarre le bot"
+    echo "    2. Envoie le code d'activation sur Telegram"
+    echo ""
+
+    show_activation_code "$SETUP_CODE"
+
+    echo "  ${C_DIM}Appuie sur Entrée pour continuer...${C_RESET}"
+    read_key -rsn1
+}
+
+interactive_menu() {
+    check_update_async
+    trap cleanup_update_check EXIT
+
+    while true; do
+        clear
+        logo
+        show_update_banner
+
+        if ! check_setup_complete; then
+            show_setup_required_banner
+        fi
+
+        echo ""
+        get_status
+        echo ""
+
+        draw_menu
+
+        case "$SELECTED_ACTION" in
+            refresh)
+                continue
+                ;;
+            start) do_start_interactive ;;
+            stop) do_stop_interactive ;;
+            kill_tmux) do_kill_tmux_interactive ;;
+            logs) do_logs_interactive ;;
+            config) ${EDITOR:-nano} "$CONFIG_FILE" ;;
+            prompt) ${EDITOR:-nano} "$TELEBOT_DIR/CLAUDE.md" ;;
+            changelog) do_changelog_interactive ;;
+            skills) do_skills_interactive ;;
+            help) do_help_interactive ;;
+            docs) do_docs_interactive ;;
+            update)
+                if update; then
+                    cleanup_update_check
+                    exec "$TELEBOT_DIR/telebot"
+                fi
+                ;;
+            reset_config) do_reset_config_interactive ;;
+            uninstall)
+                uninstall
+                if [ ! -d "$TELEBOT_DIR" ]; then
+                    exit 0
+                fi
+                ;;
+            quit)
+                clear
+                logo
+                echo "  ${C_DIM}👋 À bientôt !${C_RESET}"
+                echo ""
+                exit 0
+                ;;
+        esac
+    done
+}
+
+case "${1:-}" in
+    start)     start ;;
+    stop)      stop ;;
+    status)    status ;;
+    config)    config ;;
+    prompt)    prompt ;;
+    logs)      logs ;;
+    update)    update ;;
+    uninstall) uninstall ;;
+    *)         interactive_menu ;;
+esac
