@@ -4,6 +4,17 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.1.0] - 2026-02-06
+
+### Ajouté
+- Whitelist de permissions Claude Code : pré-approuve les commandes sûres (git, npm, node, etc.) pour les sessions bot
+- Commandes dangereuses (rm, sudo, kill) restent bloquées par défaut
+- Menu CLI "Gérer les permissions Claude" : voir, restaurer, éditer, supprimer la whitelist
+- Déploiement automatique à l'installation, proposition de mise à jour lors de `telebot update`
+- Fichier `settings.json.default` comme référence des permissions par défaut
+
+---
+
 ## [1.0.4] - 2026-02-06
 
 ### Corrigé

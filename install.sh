@@ -480,6 +480,8 @@ download_files() {
     curl -fsSL "$REPO/lib/ui.sh" -o "$TELEBOT_DIR/lib/ui.sh"
     curl -fsSL "$REPO/lib/docs.sh" -o "$TELEBOT_DIR/lib/docs.sh"
     curl -fsSL "$REPO/lib/skills.sh" -o "$TELEBOT_DIR/lib/skills.sh"
+    curl -fsSL "$REPO/lib/permissions.sh" -o "$TELEBOT_DIR/lib/permissions.sh"
+    curl -fsSL "$REPO/settings.json.default" -o "$TELEBOT_DIR/settings.json.default"
     mkdir -p "$TELEBOT_DIR/dist"
     curl -fsSL "$REPO/dist/index.js" -o "$TELEBOT_DIR/dist/index.js"
     curl -fsSL "$REPO/dist/types.js" -o "$TELEBOT_DIR/dist/types.js"
@@ -603,6 +605,10 @@ SETUP_CODE=$(grep "SETUP_CODE=" "$TELEBOT_DIR/config.env" 2>/dev/null | cut -d'=
 
 if [ ! -f "$TELEBOT_DIR/CLAUDE.md" ]; then
     curl -fsSL "$REPO/CLAUDE.md.default" -o "$TELEBOT_DIR/CLAUDE.md"
+fi
+
+if [ ! -f "$TELEBOT_DIR/.claude/settings.json" ]; then
+    cp "$TELEBOT_DIR/settings.json.default" "$TELEBOT_DIR/.claude/settings.json"
 fi
 
 section "⚙️  Finalisation"

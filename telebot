@@ -16,6 +16,7 @@ source "$TELEBOT_DIR/lib/platform.sh"
 source "$TELEBOT_DIR/lib/ui.sh"
 source "$TELEBOT_DIR/lib/docs.sh"
 source "$TELEBOT_DIR/lib/skills.sh"
+source "$TELEBOT_DIR/lib/permissions.sh"
 
 get_version() {
     grep '"version"' "$TELEBOT_DIR/package.json" 2>/dev/null | cut -d'"' -f4
@@ -302,6 +303,8 @@ update() {
         curl -fsSL "$REPO/lib/ui.sh" -o "$TELEBOT_DIR/lib/ui.sh"
         curl -fsSL "$REPO/lib/docs.sh" -o "$TELEBOT_DIR/lib/docs.sh"
         curl -fsSL "$REPO/lib/skills.sh" -o "$TELEBOT_DIR/lib/skills.sh"
+        curl -fsSL "$REPO/lib/permissions.sh" -o "$TELEBOT_DIR/lib/permissions.sh"
+        curl -fsSL "$REPO/settings.json.default" -o "$TELEBOT_DIR/settings.json.default"
         mkdir -p "$TELEBOT_DIR/dist"
         curl -fsSL "$REPO/dist/index.js" -o "$TELEBOT_DIR/dist/index.js"
         curl -fsSL "$REPO/dist/types.js" -o "$TELEBOT_DIR/dist/types.js"
@@ -331,6 +334,23 @@ update() {
     if [ $? -eq 1 ]; then
         curl -fsSL "$REPO/CLAUDE.md.default" -o "$TELEBOT_DIR/CLAUDE.md"
         success "Instructions Claude mises à jour"
+    fi
+
+    echo ""
+
+    if [ -f "$TELEBOT_DIR/.claude/settings.json" ]; then
+        menu "🔐 Mettre à jour les permissions Claude ?" "Non, garder mes personnalisations" "Oui, mettre à jour"
+        if [ $? -eq 1 ]; then
+            cp "$TELEBOT_DIR/settings.json.default" "$TELEBOT_DIR/.claude/settings.json"
+            success "Permissions Claude mises à jour"
+        fi
+    else
+        menu "🔐 Activer la whitelist de permissions ?" "Non merci" "Oui, activer"
+        if [ $? -eq 1 ]; then
+            mkdir -p "$TELEBOT_DIR/.claude"
+            cp "$TELEBOT_DIR/settings.json.default" "$TELEBOT_DIR/.claude/settings.json"
+            success "Whitelist de permissions activée"
+        fi
     fi
 
     echo ""
@@ -447,6 +467,9 @@ build_menu() {
 
     MENU_OPTIONS+=("Éditer les instructions Claude")
     MENU_ACTIONS+=("prompt")
+
+    MENU_OPTIONS+=("Gérer les permissions Claude")
+    MENU_ACTIONS+=("permissions")
 
     MENU_OPTIONS+=("Nouveautés")
     MENU_ACTIONS+=("changelog")
@@ -913,6 +936,7 @@ interactive_menu() {
             prompt) ${EDITOR:-nano} "$TELEBOT_DIR/CLAUDE.md" ;;
             changelog) do_changelog_interactive ;;
             skills) do_skills_interactive ;;
+            permissions) do_permissions_interactive ;;
             help) do_help_interactive ;;
             docs) do_docs_interactive ;;
             update)
