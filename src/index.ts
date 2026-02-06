@@ -133,8 +133,8 @@ async function main(): Promise<void> {
     // Permission detection - runs on every iteration (independent of stability)
     if (!state.isYoloMode) {
       const perm = detectPermission(current);
-      if (perm && perm.hash !== state.lastPermHash) {
-        state.lastPermHash = perm.hash;
+      if (perm && state.lastPermHash === null) {
+        state.lastPermHash = 'sent';
         const ctxBlock = perm.context ? `\`\`\`\n${perm.context}\n\`\`\`\n\n` : '';
         bot.sendMessage(
           state.chatId!,
@@ -146,6 +146,9 @@ async function main(): Promise<void> {
             '`3` → Non',
           { parse_mode: 'Markdown' }
         );
+      } else if (!perm && state.lastPermHash !== null) {
+        // Permission dialog gone (user responded) - reset for next one
+        state.lastPermHash = null;
       }
     }
 

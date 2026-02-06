@@ -233,7 +233,6 @@ export async function handleMessage(msg: TelegramBot.Message, ctx: BotContext): 
   }
 
   state.chatId = msg.chat.id;
-  state.lastPermHash = null;
 
   if (!tmuxExists()) {
     tmuxCreate();

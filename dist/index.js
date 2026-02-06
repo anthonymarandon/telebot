@@ -110,8 +110,8 @@ async function main() {
         // Permission detection - runs on every iteration (independent of stability)
         if (!state.isYoloMode) {
             const perm = (0, parser_1.detectPermission)(current);
-            if (perm && perm.hash !== state.lastPermHash) {
-                state.lastPermHash = perm.hash;
+            if (perm && state.lastPermHash === null) {
+                state.lastPermHash = 'sent';
                 const ctxBlock = perm.context ? `\`\`\`\n${perm.context}\n\`\`\`\n\n` : '';
                 bot.sendMessage(state.chatId, '🔐 *Autorisation requise*\n\n' +
                     ctxBlock +
@@ -119,6 +119,10 @@ async function main() {
                     '`1` → Oui (juste cette fois)\n' +
                     '`2` → Oui, toujours\n' +
                     '`3` → Non', { parse_mode: 'Markdown' });
+            }
+            else if (!perm && state.lastPermHash !== null) {
+                // Permission dialog gone (user responded) - reset for next one
+                state.lastPermHash = null;
             }
         }
         // Content changed

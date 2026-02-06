@@ -4,6 +4,15 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.0.2] - 2026-02-06
+
+### Corrigé
+- Suppression du doublon de notification de permission Telegram
+- Reset du flag permission uniquement quand le dialogue disparaît de tmux
+- Filtrage des lignes vides en fin de capture tmux pour la détection
+
+---
+
 ## [1.0.1] - 2026-02-06
 
 ### Corrigé

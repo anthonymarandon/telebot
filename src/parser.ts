@@ -127,7 +127,8 @@ export interface PermissionInfo {
 }
 
 export function detectPermission(text: string): PermissionInfo | null {
-  const lines = text.split('\n');
+  // Filter trailing empty lines before taking last 30
+  const lines = text.split('\n').filter(l => l.trim() !== '');
   const last = lines.slice(-30).join('\n');
   // Strip spinner characters for stable matching
   const clean = last.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◓◑◒]/g, '');
@@ -143,7 +144,9 @@ export function detectPermission(text: string): PermissionInfo | null {
   if (!isPerm && !isAllow && !isYN) return null;
 
   // Extract command context from permission dialog
-  const cleanLines = clean.split('\n').map(l => l.trim()).filter(Boolean);
+  const cleanLines = clean.split('\n').map(l => l.trim()).filter(
+    l => l !== '' && !/^[─━═]+$/.test(l)
+  );
   let context = '';
 
   for (let i = 0; i < cleanLines.length; i++) {
@@ -156,7 +159,7 @@ export function detectPermission(text: string): PermissionInfo | null {
     ) {
       // Take the lines before the question as context (command info)
       const ctxLines = cleanLines.slice(Math.max(0, i - 4), i).filter(
-        l => !l.startsWith('Esc ') && !l.startsWith('❯') && !l.match(/^\d+\./)
+        l => !l.startsWith('Esc ') && !l.startsWith('❯') && !l.match(/^\d+\./) && !/^[─━═]+$/.test(l)
       );
       context = ctxLines.join('\n');
       break;

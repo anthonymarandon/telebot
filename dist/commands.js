@@ -168,7 +168,6 @@ async function handleMessage(msg, ctx) {
         return;
     }
     state.chatId = msg.chat.id;
-    state.lastPermHash = null;
     if (!(0, tmux_1.tmuxExists)()) {
         (0, tmux_1.tmuxCreate)();
         bot.sendChatAction(state.chatId, 'typing').catch(() => { });
