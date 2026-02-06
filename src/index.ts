@@ -119,76 +119,87 @@ async function main(): Promise<void> {
 
   // Monitoring loop
   setInterval(async () => {
-    if (!state.chatId || !tmuxExists()) {
-      monitoring.synced = false;
-      return;
-    }
-
-    const current = tmuxRead();
-
-    // Initial sync
-    if (!monitoring.synced) {
-      extractResponses(current).forEach(r => state.sentResponses.add(normalizeForComparison(r)));
-      monitoring.synced = true;
-      monitoring.previous = current;
-      return;
-    }
-
-    // Permission detection - runs on every iteration (independent of stability)
-    if (!state.isYoloMode) {
-      const perm = detectPermission(current);
-      if (perm && state.lastPermHash === null) {
-        state.lastPermHash = 'sent';
-        const ctxBlock = perm.context ? `\`\`\`\n${perm.context}\n\`\`\`\n\n` : '';
-        bot.sendMessage(
-          state.chatId!,
-          '🔐 *Autorisation requise*\n\n' +
-            ctxBlock +
-            '*Réponds avec :*\n' +
-            '`1` → Oui (juste cette fois)\n' +
-            '`2` → Oui, toujours\n' +
-            '`3` → Non',
-          { parse_mode: 'Markdown' }
-        );
-      } else if (!perm && state.lastPermHash !== null) {
-        // Permission dialog gone (user responded) - reset for next one
-        state.lastPermHash = null;
+    try {
+      if (!state.chatId || !tmuxExists()) {
+        monitoring.synced = false;
+        return;
       }
-    }
 
-    // Content changed
-    if (current !== monitoring.previous) {
-      monitoring.stable = 0;
-      monitoring.processed = false;
-      monitoring.previous = current;
+      const current = tmuxRead();
 
-      const now = Date.now();
-      if (now - monitoring.lastTyping > 4000) {
-        bot.sendChatAction(state.chatId, 'typing').catch(() => {});
-        monitoring.lastTyping = now;
+      // Initial sync
+      if (!monitoring.synced) {
+        extractResponses(current).forEach(r => state.sentResponses.add(normalizeForComparison(r)));
+        monitoring.synced = true;
+        monitoring.previous = current;
+        return;
       }
-      return;
-    }
 
-    monitoring.stable++;
+      // Permission detection - runs on every iteration (independent of stability)
+      if (!state.isYoloMode) {
+        const perm = detectPermission(current);
+        if (perm && state.lastPermHash === null) {
+          state.lastPermHash = 'sent';
+          const ctxBlock = perm.context ? `\`\`\`\n${perm.context}\n\`\`\`\n\n` : '';
+          bot.sendMessage(
+            state.chatId!,
+            '🔐 *Autorisation requise*\n\n' +
+              ctxBlock +
+              '*Réponds avec :*\n' +
+              '`1` → Oui (juste cette fois)\n' +
+              '`2` → Oui, toujours\n' +
+              '`3` → Non',
+            { parse_mode: 'Markdown' }
+          );
+        } else if (!perm && state.lastPermHash !== null) {
+          // Permission dialog gone (user responded) - reset for next one
+          state.lastPermHash = null;
+        }
+      }
 
-    // Stable = process responses
-    if (monitoring.stable === STABILITY && !monitoring.processed) {
-      monitoring.processed = true;
+      // Content changed
+      if (current !== monitoring.previous) {
+        monitoring.stable = 0;
+        monitoring.processed = false;
+        monitoring.previous = current;
 
-      for (const resp of extractResponses(current)) {
-        const normalized = normalizeForComparison(resp);
-        if (resp && !state.sentResponses.has(normalized)) {
-          state.sentResponses.add(normalized);
-          for (const chunk of splitMessage(resp)) {
-            try {
-              await bot.sendMessage(state.chatId!, chunk);
-            } catch (e) {
-              console.error('Erreur envoi:', (e as Error).message);
+        const now = Date.now();
+        if (now - monitoring.lastTyping > 4000) {
+          bot.sendChatAction(state.chatId, 'typing').catch(() => {});
+          monitoring.lastTyping = now;
+        }
+        return;
+      }
+
+      monitoring.stable++;
+
+      // Stable = process responses
+      if (monitoring.stable === STABILITY && !monitoring.processed) {
+        monitoring.processed = true;
+
+        const responses = extractResponses(current);
+        if (responses.length === 0 && current.length > 50) {
+          const hasMarker = current.includes('⏺');
+          const hasPrompt = current.includes('❯');
+          console.log(`[monitoring] Contenu stable (${current.length} chars), 0 réponses extraites. Marqueur ⏺: ${hasMarker}, Prompt ❯: ${hasPrompt}`);
+        }
+
+        for (const resp of responses) {
+          const normalized = normalizeForComparison(resp);
+          if (resp && !state.sentResponses.has(normalized)) {
+            state.sentResponses.add(normalized);
+            for (const chunk of splitMessage(resp)) {
+              try {
+                await bot.sendMessage(state.chatId!, chunk);
+              } catch (e) {
+                console.error('Erreur envoi:', (e as Error).message);
+              }
             }
           }
         }
       }
+    } catch (err) {
+      console.error('Erreur monitoring:', (err as Error).message);
     }
   }, POLL_INTERVAL);
 }

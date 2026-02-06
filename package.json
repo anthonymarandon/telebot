@@ -1,6 +1,6 @@
 {
   "name": "telebot",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Bot Telegram pour Claude Code via tmux",
   "main": "bot.js",
   "scripts": {

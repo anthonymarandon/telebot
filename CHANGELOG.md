@@ -4,6 +4,15 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.0.4] - 2026-02-06
+
+### Corrigé
+- Réponses Claude invisibles sur Telegram (VPS Linux) : UTF-8 forcé dans tmux (`tmux -u` + `LANG=C.UTF-8`)
+- Boucle de monitoring fragile : ajout try-catch global pour éviter les crashs silencieux
+- Log diagnostic quand du contenu stable est détecté sans réponse extraite (aide au debug)
+
+---
+
 ## [1.0.3] - 2026-02-06
 
 ### Corrigé

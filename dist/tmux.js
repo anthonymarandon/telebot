@@ -46,14 +46,15 @@ function tmuxKillAll() {
 }
 function tmuxCreate(yoloMode = false) {
     tmuxKillAll();
-    (0, child_process_1.execSync)(`tmux new-session -d -s ${exports.TMUX_SESSION} -x 200 -y 50`);
+    // -u forces UTF-8 (required for Claude Code's Unicode markers like ⏺ and ❯)
+    (0, child_process_1.execSync)(`tmux -u new-session -d -s ${exports.TMUX_SESSION} -x 200 -y 50`);
     const context = (0, config_1.buildInjectedContext)();
     let systemPromptArg = '';
     if (context.trim()) {
         (0, fs_1.writeFileSync)(CONTEXT_FILE, context);
         systemPromptArg = ` --system-prompt "${CONTEXT_FILE}"`;
     }
-    const envVars = 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false';
+    const envVars = 'LANG=C.UTF-8 CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false';
     const claudeCmd = yoloMode ? 'claude --dangerously-skip-permissions' : 'claude';
     const cmd = `${envVars} ${claudeCmd}${systemPromptArg}`;
     (0, child_process_1.execSync)(`tmux send-keys -t ${exports.TMUX_SESSION} '${cmd}' Enter`);

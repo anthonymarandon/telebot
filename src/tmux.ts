@@ -38,7 +38,8 @@ export function tmuxKillAll(): void {
 
 export function tmuxCreate(yoloMode = false): void {
   tmuxKillAll();
-  execSync(`tmux new-session -d -s ${TMUX_SESSION} -x 200 -y 50`);
+  // -u forces UTF-8 (required for Claude Code's Unicode markers like ⏺ and ❯)
+  execSync(`tmux -u new-session -d -s ${TMUX_SESSION} -x 200 -y 50`);
 
   const context = buildInjectedContext();
   let systemPromptArg = '';
@@ -48,7 +49,7 @@ export function tmuxCreate(yoloMode = false): void {
     systemPromptArg = ` --system-prompt "${CONTEXT_FILE}"`;
   }
 
-  const envVars = 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false';
+  const envVars = 'LANG=C.UTF-8 CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false';
   const claudeCmd = yoloMode ? 'claude --dangerously-skip-permissions' : 'claude';
   const cmd = `${envVars} ${claudeCmd}${systemPromptArg}`;
   execSync(`tmux send-keys -t ${TMUX_SESSION} '${cmd}' Enter`);
