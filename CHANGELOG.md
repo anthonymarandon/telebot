@@ -4,6 +4,13 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.1.1] - 2026-02-06
+
+### Corrigé
+- Bump version patch
+
+---
+
 ## [1.1.0] - 2026-02-06
 
 ### Ajouté
