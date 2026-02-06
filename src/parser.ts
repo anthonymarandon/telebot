@@ -76,20 +76,23 @@ export function isValidResponse(text: string): boolean {
   return !isProgressMessage(trimmed);
 }
 
+// Regex matching Claude Code response markers (⏺ older versions, ● v2.1+)
+const RESPONSE_MARKER = /[⏺●]/;
+
 export function extractResponses(text: string): string[] {
   const responses: string[] = [];
   let current: string[] = [];
   let inResp = false;
 
   text.split('\n').forEach(line => {
-    if (line.includes('⏺')) {
+    if (RESPONSE_MARKER.test(line)) {
       if (current.length) {
         const cleaned = cleanResponse(current.join('\n'));
         if (cleaned && isValidResponse(cleaned)) {
           responses.push(cleaned);
         }
       }
-      const afterMarker = line.split('⏺')[1]?.trim() || '';
+      const afterMarker = line.split(RESPONSE_MARKER)[1]?.trim() || '';
       if (isProgressMessage(afterMarker)) {
         current = [];
         inResp = false;

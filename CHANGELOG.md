@@ -10,6 +10,7 @@ Toutes les modifications notables de Telebot sont documentées ici.
 - Réponses Claude invisibles sur Telegram (VPS Linux) : UTF-8 forcé dans tmux (`tmux -u` + `LANG=C.UTF-8`)
 - Boucle de monitoring fragile : ajout try-catch global pour éviter les crashs silencieux
 - Log diagnostic quand du contenu stable est détecté sans réponse extraite (aide au debug)
+- Parser incompatible avec Claude Code v2.1+ : marqueur de réponse `●` au lieu de `⏺`
 
 ---
 

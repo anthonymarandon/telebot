@@ -79,19 +79,21 @@ function isValidResponse(text) {
         return false;
     return !isProgressMessage(trimmed);
 }
+// Regex matching Claude Code response markers (⏺ older versions, ● v2.1+)
+const RESPONSE_MARKER = /[⏺●]/;
 function extractResponses(text) {
     const responses = [];
     let current = [];
     let inResp = false;
     text.split('\n').forEach(line => {
-        if (line.includes('⏺')) {
+        if (RESPONSE_MARKER.test(line)) {
             if (current.length) {
                 const cleaned = (0, utils_1.cleanResponse)(current.join('\n'));
                 if (cleaned && isValidResponse(cleaned)) {
                     responses.push(cleaned);
                 }
             }
-            const afterMarker = line.split('⏺')[1]?.trim() || '';
+            const afterMarker = line.split(RESPONSE_MARKER)[1]?.trim() || '';
             if (isProgressMessage(afterMarker)) {
                 current = [];
                 inResp = false;
