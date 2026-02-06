@@ -68,6 +68,9 @@ async function main() {
         lastTyping: 0,
     };
     const bot = new node_telegram_bot_api_1.default(TOKEN, { polling: true });
+    bot.on('polling_error', err => {
+        console.error('Erreur polling Telegram:', err.message);
+    });
     const ctx = {
         bot,
         state,

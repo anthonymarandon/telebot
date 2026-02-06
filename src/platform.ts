@@ -25,7 +25,22 @@ export function killBotProcesses(): void {
     if (IS_WINDOWS) {
       execSync('taskkill /F /IM node.exe /FI "WINDOWTITLE eq bot.js" 2>nul', { stdio: 'ignore' });
     } else {
-      execSync('pkill -f "node.*bot\\.js" 2>/dev/null || true', { stdio: 'ignore' });
+      // Use pgrep to find PIDs, then filter out our own PID to avoid self-kill
+      const result = execSync('pgrep -f "node.*bot\\.js" 2>/dev/null || true', {
+        encoding: 'utf8',
+      });
+      const myPid = String(process.pid);
+      const pids = result
+        .trim()
+        .split('\n')
+        .map(p => p.trim())
+        .filter(p => p && p !== myPid);
+
+      for (const pid of pids) {
+        try {
+          process.kill(parseInt(pid), 'SIGTERM');
+        } catch {}
+      }
     }
   } catch {}
 }

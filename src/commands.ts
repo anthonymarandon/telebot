@@ -93,7 +93,13 @@ export async function handleYolo(msg: TelegramBot.Message, ctx: BotContext): Pro
   state.isYoloMode = true;
   state.chatId = msg.chat.id;
 
-  tmuxCreate(true);
+  try {
+    tmuxCreate(true);
+  } catch (err) {
+    bot.sendMessage(state.chatId, '❌ *Erreur* : impossible de lancer la session tmux.\n\nVérifie que `tmux` est installé sur ta machine.', { parse_mode: 'Markdown' });
+    console.error('tmuxCreate error:', (err as Error).message);
+    return;
+  }
   bot.sendChatAction(state.chatId, 'typing').catch(() => {});
   await waitForClaude();
 
@@ -235,7 +241,13 @@ export async function handleMessage(msg: TelegramBot.Message, ctx: BotContext): 
   state.chatId = msg.chat.id;
 
   if (!tmuxExists()) {
-    tmuxCreate();
+    try {
+      tmuxCreate();
+    } catch (err) {
+      bot.sendMessage(state.chatId!, '❌ *Erreur* : impossible de lancer la session tmux.\n\nVérifie que `tmux` est installé sur ta machine.', { parse_mode: 'Markdown' });
+      console.error('tmuxCreate error:', (err as Error).message);
+      return;
+    }
     bot.sendChatAction(state.chatId!, 'typing').catch(() => {});
     const ready = await waitForClaude();
     if (!ready) {

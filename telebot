@@ -164,8 +164,18 @@ start() {
     cd "$TELEBOT_DIR" || return 1
     TELEBOT_DIR="$TELEBOT_DIR" nohup node bot.js >> "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
+    local bot_pid=$!
 
-    echo "✅ Bot démarré (PID $!)"
+    # Verify the bot actually started
+    sleep 1
+    if ! kill -0 "$bot_pid" 2>/dev/null; then
+        rm -f "$PID_FILE"
+        echo "❌ Le bot a crashé au démarrage"
+        echo "   Vérifiez les logs: tail -20 $LOG_FILE"
+        exit 1
+    fi
+
+    echo "✅ Bot démarré (PID $bot_pid)"
     echo "   Logs: $LOG_FILE"
 
     check_update_silent &
@@ -651,7 +661,18 @@ do_start_interactive() {
     else
         cd "$TELEBOT_DIR" || return 1
         TELEBOT_DIR="$TELEBOT_DIR" nohup node bot.js >> "$LOG_FILE" 2>&1 &
-        echo $! > "$PID_FILE"
+        local bot_pid=$!
+        echo $bot_pid > "$PID_FILE"
+
+        sleep 1
+        if ! kill -0 "$bot_pid" 2>/dev/null; then
+            rm -f "$PID_FILE"
+            fail "Le bot a crashé au démarrage"
+            echo "  ${C_DIM}Vérifiez les logs: tail -20 $LOG_FILE${C_RESET}"
+            echo ""
+            pause_return 3
+            return
+        fi
         success "Bot démarré"
     fi
 

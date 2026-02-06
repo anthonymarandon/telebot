@@ -4,6 +4,16 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.0.3] - 2026-02-06
+
+### Corrigé
+- Bot se tuait lui-même au démarrage (`killBotProcesses` envoyait SIGTERM à son propre PID)
+- Crash silencieux si tmux absent : message d'erreur envoyé sur Telegram au lieu d'un crash muet
+- Erreurs de polling Telegram non gérées : ajout d'un handler `polling_error`
+- CLI affichait "Bot démarré" même si le processus crashait immédiatement : vérification post-démarrage
+
+---
+
 ## [1.0.2] - 2026-02-06
 
 ### Corrigé

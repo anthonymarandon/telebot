@@ -71,7 +71,14 @@ async function handleYolo(msg, ctx) {
     state.lastPermHash = null;
     state.isYoloMode = true;
     state.chatId = msg.chat.id;
-    (0, tmux_1.tmuxCreate)(true);
+    try {
+        (0, tmux_1.tmuxCreate)(true);
+    }
+    catch (err) {
+        bot.sendMessage(state.chatId, '❌ *Erreur* : impossible de lancer la session tmux.\n\nVérifie que `tmux` est installé sur ta machine.', { parse_mode: 'Markdown' });
+        console.error('tmuxCreate error:', err.message);
+        return;
+    }
     bot.sendChatAction(state.chatId, 'typing').catch(() => { });
     await (0, tmux_1.waitForClaude)();
     bot.sendMessage(state.chatId, '⚡ *Mode YOLO activé*\n\nClaude fonctionne sans demander de permissions.\n\n⚠️ Toutes les commandes seront exécutées automatiquement.', { parse_mode: 'Markdown' });
@@ -169,7 +176,14 @@ async function handleMessage(msg, ctx) {
     }
     state.chatId = msg.chat.id;
     if (!(0, tmux_1.tmuxExists)()) {
-        (0, tmux_1.tmuxCreate)();
+        try {
+            (0, tmux_1.tmuxCreate)();
+        }
+        catch (err) {
+            bot.sendMessage(state.chatId, '❌ *Erreur* : impossible de lancer la session tmux.\n\nVérifie que `tmux` est installé sur ta machine.', { parse_mode: 'Markdown' });
+            console.error('tmuxCreate error:', err.message);
+            return;
+        }
         bot.sendChatAction(state.chatId, 'typing').catch(() => { });
         const ready = await (0, tmux_1.waitForClaude)();
         if (!ready) {

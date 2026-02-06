@@ -83,6 +83,10 @@ async function main(): Promise<void> {
 
   const bot = new TelegramBot(TOKEN, { polling: true });
 
+  bot.on('polling_error', err => {
+    console.error('Erreur polling Telegram:', (err as Error).message);
+  });
+
   const ctx: BotContext = {
     bot,
     state,
