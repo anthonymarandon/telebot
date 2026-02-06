@@ -4,6 +4,17 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.0.1] - 2026-02-06
+
+### Corrigé
+- Détection des permissions fiable (vérification continue, indépendante de la stabilité)
+- Hash stable basé sur le contexte de la commande (insensible aux animations tmux)
+- Affichage de la commande demandée dans le message Telegram de permission
+- Ajout de `platform.js` manquant dans `install.sh` et `telebot update`
+- Attente dynamique du démarrage de Claude (remplace le timeout fixe de 3s)
+
+---
+
 ## [1.0.0] - 2026-02-06
 
 ### Bot Telegram

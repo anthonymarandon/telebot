@@ -121,21 +121,49 @@ export function extractResponses(text: string): string[] {
   return [...new Set(responses)];
 }
 
-export function detectPermission(text: string): string | null {
-  const last = text.split('\n').slice(-30).join('\n');
+export interface PermissionInfo {
+  hash: string;
+  context: string;
+}
 
-  if (
-    last.includes('Do you want to proceed?') ||
-    last.includes('want to run') ||
-    last.includes('Allow') ||
-    /\d+\.\s*(Yes|No|Oui|Non)/i.test(last)
-  ) {
-    return `perm:${last.slice(-200)}`;
+export function detectPermission(text: string): PermissionInfo | null {
+  const lines = text.split('\n');
+  const last = lines.slice(-30).join('\n');
+  // Strip spinner characters for stable matching
+  const clean = last.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◓◑◒]/g, '');
+
+  const isPerm =
+    clean.includes('Do you want to proceed?') ||
+    clean.includes('want to run') ||
+    /\d+\.\s*(Yes|No|Oui|Non)/i.test(clean);
+
+  const isAllow = clean.includes('Allow');
+  const isYN = /\(y\/n\)|\(yes\/no\)/i.test(clean);
+
+  if (!isPerm && !isAllow && !isYN) return null;
+
+  // Extract command context from permission dialog
+  const cleanLines = clean.split('\n').map(l => l.trim()).filter(Boolean);
+  let context = '';
+
+  for (let i = 0; i < cleanLines.length; i++) {
+    const line = cleanLines[i];
+    if (
+      line.includes('Do you want to proceed?') ||
+      line.includes('Allow') ||
+      line.includes('want to run') ||
+      /\(y\/n\)/i.test(line)
+    ) {
+      // Take the lines before the question as context (command info)
+      const ctxLines = cleanLines.slice(Math.max(0, i - 4), i).filter(
+        l => !l.startsWith('Esc ') && !l.startsWith('❯') && !l.match(/^\d+\./)
+      );
+      context = ctxLines.join('\n');
+      break;
+    }
   }
 
-  if (/\(y\/n\)|\(yes\/no\)/i.test(last)) {
-    return `yn:${last.slice(-200)}`;
-  }
-
-  return null;
+  // Stable hash based on context (not raw text that may contain animations)
+  const hash = `perm:${context.slice(0, 200)}`;
+  return { hash, context };
 }

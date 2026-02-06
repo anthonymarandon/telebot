@@ -107,6 +107,20 @@ async function main() {
             monitoring.previous = current;
             return;
         }
+        // Permission detection - runs on every iteration (independent of stability)
+        if (!state.isYoloMode) {
+            const perm = (0, parser_1.detectPermission)(current);
+            if (perm && perm.hash !== state.lastPermHash) {
+                state.lastPermHash = perm.hash;
+                const ctxBlock = perm.context ? `\`\`\`\n${perm.context}\n\`\`\`\n\n` : '';
+                bot.sendMessage(state.chatId, '🔐 *Autorisation requise*\n\n' +
+                    ctxBlock +
+                    '*Réponds avec :*\n' +
+                    '`1` → Oui (juste cette fois)\n' +
+                    '`2` → Oui, toujours\n' +
+                    '`3` → Non', { parse_mode: 'Markdown' });
+            }
+        }
         // Content changed
         if (current !== monitoring.previous) {
             monitoring.stable = 0;
@@ -120,7 +134,7 @@ async function main() {
             return;
         }
         monitoring.stable++;
-        // Stable = process
+        // Stable = process responses
         if (monitoring.stable === STABILITY && !monitoring.processed) {
             monitoring.processed = true;
             for (const resp of (0, parser_1.extractResponses)(current)) {
@@ -135,18 +149,6 @@ async function main() {
                             console.error('Erreur envoi:', e.message);
                         }
                     }
-                }
-            }
-            if (!state.isYoloMode) {
-                const perm = (0, parser_1.detectPermission)(current);
-                if (perm && perm !== state.lastPermHash) {
-                    state.lastPermHash = perm;
-                    bot.sendMessage(state.chatId, '🔐 *Autorisation requise*\n\n' +
-                        'Claude veut exécuter une action.\n\n' +
-                        '*Réponds avec :*\n' +
-                        '`1` → Oui (juste cette fois)\n' +
-                        '`2` → Oui, toujours\n' +
-                        '`3` → Non', { parse_mode: 'Markdown' });
                 }
             }
         }

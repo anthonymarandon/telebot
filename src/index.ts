@@ -130,6 +130,25 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Permission detection - runs on every iteration (independent of stability)
+    if (!state.isYoloMode) {
+      const perm = detectPermission(current);
+      if (perm && perm.hash !== state.lastPermHash) {
+        state.lastPermHash = perm.hash;
+        const ctxBlock = perm.context ? `\`\`\`\n${perm.context}\n\`\`\`\n\n` : '';
+        bot.sendMessage(
+          state.chatId!,
+          '🔐 *Autorisation requise*\n\n' +
+            ctxBlock +
+            '*Réponds avec :*\n' +
+            '`1` → Oui (juste cette fois)\n' +
+            '`2` → Oui, toujours\n' +
+            '`3` → Non',
+          { parse_mode: 'Markdown' }
+        );
+      }
+    }
+
     // Content changed
     if (current !== monitoring.previous) {
       monitoring.stable = 0;
@@ -146,7 +165,7 @@ async function main(): Promise<void> {
 
     monitoring.stable++;
 
-    // Stable = process
+    // Stable = process responses
     if (monitoring.stable === STABILITY && !monitoring.processed) {
       monitoring.processed = true;
 
@@ -161,23 +180,6 @@ async function main(): Promise<void> {
               console.error('Erreur envoi:', (e as Error).message);
             }
           }
-        }
-      }
-
-      if (!state.isYoloMode) {
-        const perm = detectPermission(current);
-        if (perm && perm !== state.lastPermHash) {
-          state.lastPermHash = perm;
-          bot.sendMessage(
-            state.chatId!,
-            '🔐 *Autorisation requise*\n\n' +
-              'Claude veut exécuter une action.\n\n' +
-              '*Réponds avec :*\n' +
-              '`1` → Oui (juste cette fois)\n' +
-              '`2` → Oui, toujours\n' +
-              '`3` → Non',
-            { parse_mode: 'Markdown' }
-          );
         }
       }
     }
