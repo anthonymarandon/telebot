@@ -44,6 +44,7 @@ async function ensureSingleInstance() {
 async function main() {
     await ensureSingleInstance();
     console.log(`🔒 Instance unique (PID ${process.pid})`);
+    (0, config_1.ensureSettings)();
     const config = (0, config_1.loadConfig)();
     const TOKEN = config.TELEGRAM_BOT_TOKEN;
     if (!TOKEN) {

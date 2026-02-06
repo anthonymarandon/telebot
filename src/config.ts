@@ -14,6 +14,8 @@ export const CLAUDE_DIR = path.join(TELEBOT_DIR, '.claude');
 export const SKILLS_DIR = path.join(CLAUDE_DIR, 'skills');
 export const SKILLS_CONFIG = path.join(CLAUDE_DIR, 'skills.json');
 export const USER_CONTEXT = path.join(TELEBOT_DIR, 'CLAUDE.md');
+const SETTINGS_FILE = path.join(CLAUDE_DIR, 'settings.json');
+const SETTINGS_DEFAULT = path.join(TELEBOT_DIR, 'settings.json.default');
 
 export function loadConfig(): TelebotConfig {
   const config: Record<string, string> = {};
@@ -34,6 +36,25 @@ export function loadConfig(): TelebotConfig {
     TELEGRAM_USER_ID: config.TELEGRAM_USER_ID || undefined,
     SETUP_CODE: config.SETUP_CODE || undefined,
   };
+}
+
+/**
+ * Ensures .claude/settings.json exists.
+ * Copies from settings.json.default if missing.
+ */
+export function ensureSettings(): void {
+  if (fs.existsSync(SETTINGS_FILE)) return;
+
+  if (!fs.existsSync(CLAUDE_DIR)) {
+    fs.mkdirSync(CLAUDE_DIR, { recursive: true });
+  }
+
+  if (fs.existsSync(SETTINGS_DEFAULT)) {
+    fs.copyFileSync(SETTINGS_DEFAULT, SETTINGS_FILE);
+    console.log(`✅ Permissions créées: ${SETTINGS_FILE}`);
+  } else {
+    console.warn(`⚠️  settings.json.default introuvable: ${SETTINGS_DEFAULT}`);
+  }
 }
 
 export function saveUserId(uid: string): boolean {

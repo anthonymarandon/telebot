@@ -38,6 +38,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.USER_CONTEXT = exports.SKILLS_CONFIG = exports.SKILLS_DIR = exports.CLAUDE_DIR = exports.CONFIG_FILE = exports.TELEBOT_DIR = void 0;
 exports.loadConfig = loadConfig;
+exports.ensureSettings = ensureSettings;
 exports.saveUserId = saveUserId;
 exports.clearSetupCode = clearSetupCode;
 exports.loadSkillsConfig = loadSkillsConfig;
@@ -54,6 +55,8 @@ exports.CLAUDE_DIR = path.join(exports.TELEBOT_DIR, '.claude');
 exports.SKILLS_DIR = path.join(exports.CLAUDE_DIR, 'skills');
 exports.SKILLS_CONFIG = path.join(exports.CLAUDE_DIR, 'skills.json');
 exports.USER_CONTEXT = path.join(exports.TELEBOT_DIR, 'CLAUDE.md');
+const SETTINGS_FILE = path.join(exports.CLAUDE_DIR, 'settings.json');
+const SETTINGS_DEFAULT = path.join(exports.TELEBOT_DIR, 'settings.json.default');
 function loadConfig() {
     const config = {};
     if (fs.existsSync(exports.CONFIG_FILE)) {
@@ -71,6 +74,24 @@ function loadConfig() {
         TELEGRAM_USER_ID: config.TELEGRAM_USER_ID || undefined,
         SETUP_CODE: config.SETUP_CODE || undefined,
     };
+}
+/**
+ * Ensures .claude/settings.json exists.
+ * Copies from settings.json.default if missing.
+ */
+function ensureSettings() {
+    if (fs.existsSync(SETTINGS_FILE))
+        return;
+    if (!fs.existsSync(exports.CLAUDE_DIR)) {
+        fs.mkdirSync(exports.CLAUDE_DIR, { recursive: true });
+    }
+    if (fs.existsSync(SETTINGS_DEFAULT)) {
+        fs.copyFileSync(SETTINGS_DEFAULT, SETTINGS_FILE);
+        console.log(`✅ Permissions créées: ${SETTINGS_FILE}`);
+    }
+    else {
+        console.warn(`⚠️  settings.json.default introuvable: ${SETTINGS_DEFAULT}`);
+    }
 }
 function saveUserId(uid) {
     try {
