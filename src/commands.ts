@@ -4,10 +4,9 @@
 
 import TelegramBot from 'node-telegram-bot-api';
 import { BotContext } from './types';
-import { isAuthorized } from './utils';
+import { isAuthorized, escapeHtml, splitMessage } from './utils';
 import { saveUserId, clearSetupCode } from './config';
 import { tmuxKillAll, tmuxCreate, tmuxExists, tmuxRead, tmuxSend, tmuxSelectOption, waitForClaude } from './tmux';
-import { splitMessage } from './utils';
 import { sleep } from './platform';
 
 // /start
@@ -45,7 +44,7 @@ export async function handleStart(msg: TelegramBot.Message, ctx: BotContext): Pr
 
   state.chatId = msg.chat.id;
 
-  const isFirstTime = state.sentResponses.size === 0;
+  const isFirstTime = !tmuxExists();
 
   if (isFirstTime) {
     bot.sendMessage(
@@ -77,7 +76,6 @@ export function handleRestart(msg: TelegramBot.Message, ctx: BotContext): void {
   if (!isAuthorized(msg.from!.id, state.userId)) return;
 
   tmuxKillAll();
-  state.sentResponses.clear();
   state.lastPermHash = null;
   state.lastAskQuestion = null;
   state.inPlanMode = false;
@@ -95,7 +93,6 @@ export async function handleYolo(msg: TelegramBot.Message, ctx: BotContext): Pro
 
   if (!isAuthorized(msg.from!.id, state.userId)) return;
 
-  state.sentResponses.clear();
   state.lastPermHash = null;
   state.lastAskQuestion = null;
   state.inPlanMode = false;
@@ -126,7 +123,6 @@ export function handleStop(msg: TelegramBot.Message, ctx: BotContext): void {
   if (!isAuthorized(msg.from!.id, state.userId)) return;
 
   tmuxKillAll();
-  state.sentResponses.clear();
   state.lastPermHash = null;
   state.lastAskQuestion = null;
   state.inPlanMode = false;
@@ -221,10 +217,10 @@ export function handleScreen(msg: TelegramBot.Message, ctx: BotContext): void {
     return;
   }
 
-  // Send as code block, split if too long for Telegram
-  const formatted = '```\n' + content + '\n```';
-  for (const chunk of splitMessage(formatted)) {
-    bot.sendMessage(msg.chat.id, chunk, { parse_mode: 'Markdown' });
+  // Send as HTML <pre> block, split if too long for Telegram
+  const escaped = escapeHtml(content);
+  for (const chunk of splitMessage(escaped, 4000, true)) {
+    bot.sendMessage(msg.chat.id, chunk, { parse_mode: 'HTML' });
   }
 }
 

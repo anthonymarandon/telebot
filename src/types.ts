@@ -28,7 +28,6 @@ export type ClaudeState = 'idle' | 'working' | 'permission' | 'asking';
 
 export interface AppState {
   chatId: number | null;
-  sentResponses: Set<string>;
   lastPermHash: string | null;
   lastAskQuestion: AskUserQuestionInfo | null;
   inPlanMode: boolean;

@@ -14,7 +14,6 @@ exports.handleMessage = handleMessage;
 const utils_1 = require("./utils");
 const config_1 = require("./config");
 const tmux_1 = require("./tmux");
-const utils_2 = require("./utils");
 const platform_1 = require("./platform");
 // /start
 async function handleStart(msg, ctx) {
@@ -38,7 +37,7 @@ async function handleStart(msg, ctx) {
         return;
     }
     state.chatId = msg.chat.id;
-    const isFirstTime = state.sentResponses.size === 0;
+    const isFirstTime = !(0, tmux_1.tmuxExists)();
     if (isFirstTime) {
         bot.sendMessage(state.chatId, '🤖 *Telebot actif !*\n\n' +
             'Tu peux maintenant utiliser Claude depuis ton téléphone.\n\n' +
@@ -60,7 +59,6 @@ function handleRestart(msg, ctx) {
     if (!(0, utils_1.isAuthorized)(msg.from.id, state.userId))
         return;
     (0, tmux_1.tmuxKillAll)();
-    state.sentResponses.clear();
     state.lastPermHash = null;
     state.lastAskQuestion = null;
     state.inPlanMode = false;
@@ -75,7 +73,6 @@ async function handleYolo(msg, ctx) {
     const { bot, state } = ctx;
     if (!(0, utils_1.isAuthorized)(msg.from.id, state.userId))
         return;
-    state.sentResponses.clear();
     state.lastPermHash = null;
     state.lastAskQuestion = null;
     state.inPlanMode = false;
@@ -99,7 +96,6 @@ function handleStop(msg, ctx) {
     if (!(0, utils_1.isAuthorized)(msg.from.id, state.userId))
         return;
     (0, tmux_1.tmuxKillAll)();
-    state.sentResponses.clear();
     state.lastPermHash = null;
     state.lastAskQuestion = null;
     state.inPlanMode = false;
@@ -168,10 +164,10 @@ function handleScreen(msg, ctx) {
         bot.sendMessage(msg.chat.id, '⚠️ Terminal vide.');
         return;
     }
-    // Send as code block, split if too long for Telegram
-    const formatted = '```\n' + content + '\n```';
-    for (const chunk of (0, utils_2.splitMessage)(formatted)) {
-        bot.sendMessage(msg.chat.id, chunk, { parse_mode: 'Markdown' });
+    // Send as HTML <pre> block, split if too long for Telegram
+    const escaped = (0, utils_1.escapeHtml)(content);
+    for (const chunk of (0, utils_1.splitMessage)(escaped, 4000, true)) {
+        bot.sendMessage(msg.chat.id, chunk, { parse_mode: 'HTML' });
     }
 }
 // Message handler

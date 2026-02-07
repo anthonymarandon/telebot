@@ -3,10 +3,10 @@
 /**
  * Telebot - Bot Telegram pour Claude Code via tmux
  *
- * Monitoring basé sur le diff de lignes :
- * - On ne traite que les NOUVELLES lignes à chaque cycle
+ * Monitoring basé sur le diff terminal (screen-based) :
+ * - On envoie directement les nouvelles lignes du terminal
  * - Machine à états : idle / working / permission / asking
- * - Anti-spam : chaque réponse n'est envoyée qu'une seule fois
+ * - Déduplication par processedIndex (pas de Set)
  */
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -59,7 +59,6 @@ async function main() {
     // Application state
     const state = {
         chatId: null,
-        sentResponses: new Set(),
         lastPermHash: null,
         lastAskQuestion: null,
         inPlanMode: false,
@@ -115,12 +114,14 @@ async function main() {
                 monitoring.synced = false;
                 return;
             }
-            const raw = (0, tmux_1.tmuxRead)();
-            const currentLines = raw.split('\n');
+            const rawFull = (0, tmux_1.tmuxRead)();
+            // Strip trailing empty lines (tmux pads with empty lines to fill pane height)
+            const currentLines = rawFull.split('\n');
+            while (currentLines.length > 0 && currentLines[currentLines.length - 1].trim() === '') {
+                currentLines.pop();
+            }
             // --- Initial sync: mark all existing content as already processed ---
             if (!monitoring.synced) {
-                // Index all existing responses so we don't re-send them
-                (0, parser_1.extractResponses)(currentLines).forEach(r => state.sentResponses.add((0, utils_1.normalizeForComparison)(r)));
                 monitoring.lastLines = currentLines;
                 monitoring.processedIndex = currentLines.length;
                 monitoring.synced = true;
@@ -128,7 +129,8 @@ async function main() {
                 return;
             }
             // --- Detect if content changed ---
-            const contentChanged = raw !== monitoring.lastLines.join('\n');
+            const currentJoined = currentLines.join('\n');
+            const contentChanged = currentJoined !== monitoring.lastLines.join('\n');
             if (contentChanged) {
                 monitoring.stable = 0;
                 monitoring.flushed = false;
@@ -149,8 +151,7 @@ async function main() {
             // --- Handle state transitions ---
             // Permission dialog appeared
             if (!state.isYoloMode && newState === 'permission' && prevState !== 'permission') {
-                // Flush any pending responses first
-                await flushNewResponses(currentLines, monitoring, state, bot);
+                await flushScreenDiff(currentLines, monitoring, state, bot);
                 const perm = (0, parser_1.extractPermission)(currentLines);
                 if (perm && state.lastPermHash === null) {
                     state.lastPermHash = perm.hash;
@@ -169,7 +170,7 @@ async function main() {
             }
             // AskUserQuestion appeared
             if (newState === 'asking' && prevState !== 'asking') {
-                await flushNewResponses(currentLines, monitoring, state, bot);
+                await flushScreenDiff(currentLines, monitoring, state, bot);
                 const askQuestion = (0, parser_1.extractAskQuestion)(currentLines);
                 if (askQuestion && state.lastAskQuestion === null) {
                     state.lastAskQuestion = askQuestion;
@@ -196,7 +197,7 @@ async function main() {
                 const newLines = currentLines.slice(monitoring.processedIndex);
                 const planChange = (0, parser_1.detectPlanChange)(newLines);
                 if (planChange === 'entered' && !state.inPlanMode) {
-                    await flushNewResponses(currentLines, monitoring, state, bot);
+                    await flushScreenDiff(currentLines, monitoring, state, bot);
                     state.inPlanMode = true;
                     bot.sendMessage(state.chatId, '📋 *Mode Plan activé*\n\n' +
                         'Claude explore et conçoit une approche d\'implémentation.\n' +
@@ -209,9 +210,9 @@ async function main() {
             }
             // Update state
             monitoring.claudeState = newState;
-            // --- Flush responses when content is stable ---
+            // --- Flush screen diff when content is stable ---
             if (monitoring.stable === STABILITY && !monitoring.flushed) {
-                await flushNewResponses(currentLines, monitoring, state, bot);
+                await flushScreenDiff(currentLines, monitoring, state, bot);
             }
         }
         catch (err) {
@@ -220,30 +221,33 @@ async function main() {
     }, POLL_INTERVAL);
 }
 /**
- * Extract and send only NEW responses (lines after processedIndex).
- * Updates processedIndex after processing.
+ * Send new terminal lines as HTML <pre> blocks.
+ * Trims terminal chrome (separators, empty prompt, hints) from the end.
  */
-async function flushNewResponses(currentLines, monitoring, state, bot) {
+async function flushScreenDiff(currentLines, monitoring, state, bot) {
     if (monitoring.flushed)
         return;
     monitoring.flushed = true;
     // Get new lines since last processing
     const newLines = currentLines.slice(monitoring.processedIndex);
-    if (newLines.length === 0)
+    if (newLines.length === 0) {
+        monitoring.processedIndex = currentLines.length;
         return;
-    const responses = (0, parser_1.extractResponses)(newLines);
-    for (const resp of responses) {
-        const normalized = (0, utils_1.normalizeForComparison)(resp);
-        if (resp && !state.sentResponses.has(normalized)) {
-            state.sentResponses.add(normalized);
-            for (const chunk of (0, utils_1.splitMessage)(resp)) {
-                try {
-                    await bot.sendMessage(state.chatId, chunk);
-                }
-                catch (e) {
-                    console.error('Erreur envoi:', e.message);
-                }
-            }
+    }
+    // Trim terminal chrome from end
+    const trimmed = (0, parser_1.trimTerminalChrome)(newLines);
+    if (trimmed.length === 0) {
+        monitoring.processedIndex = currentLines.length;
+        return;
+    }
+    // Escape HTML and send as <pre> chunks
+    const escaped = (0, utils_1.escapeHtml)(trimmed.join('\n'));
+    for (const chunk of (0, utils_1.splitMessage)(escaped, 4000, true)) {
+        try {
+            await bot.sendMessage(state.chatId, chunk, { parse_mode: 'HTML' });
+        }
+        catch (e) {
+            console.error('Erreur envoi:', e.message);
         }
     }
     // Advance the processed index

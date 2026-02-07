@@ -2,10 +2,10 @@
 /**
  * Telebot - Bot Telegram pour Claude Code via tmux
  *
- * Monitoring basé sur le diff de lignes :
- * - On ne traite que les NOUVELLES lignes à chaque cycle
+ * Monitoring basé sur le diff terminal (screen-based) :
+ * - On envoie directement les nouvelles lignes du terminal
  * - Machine à états : idle / working / permission / asking
- * - Anti-spam : chaque réponse n'est envoyée qu'une seule fois
+ * - Déduplication par processedIndex (pas de Set)
  */
 
 import TelegramBot from 'node-telegram-bot-api';
@@ -15,11 +15,11 @@ import { tmuxExists, tmuxRead } from './tmux';
 import {
   detectState,
   detectPlanChange,
-  extractResponses,
+  trimTerminalChrome,
   extractPermission,
   extractAskQuestion,
 } from './parser';
-import { splitMessage, normalizeForComparison } from './utils';
+import { escapeHtml, splitMessage } from './utils';
 import {
   handleStart,
   handleRestart,
@@ -78,7 +78,6 @@ async function main(): Promise<void> {
   // Application state
   const state: AppState = {
     chatId: null,
-    sentResponses: new Set<string>(),
     lastPermHash: null,
     lastAskQuestion: null,
     inPlanMode: false,
@@ -144,15 +143,15 @@ async function main(): Promise<void> {
         return;
       }
 
-      const raw = tmuxRead();
-      const currentLines = raw.split('\n');
+      const rawFull = tmuxRead();
+      // Strip trailing empty lines (tmux pads with empty lines to fill pane height)
+      const currentLines = rawFull.split('\n');
+      while (currentLines.length > 0 && currentLines[currentLines.length - 1].trim() === '') {
+        currentLines.pop();
+      }
 
       // --- Initial sync: mark all existing content as already processed ---
       if (!monitoring.synced) {
-        // Index all existing responses so we don't re-send them
-        extractResponses(currentLines).forEach(r =>
-          state.sentResponses.add(normalizeForComparison(r))
-        );
         monitoring.lastLines = currentLines;
         monitoring.processedIndex = currentLines.length;
         monitoring.synced = true;
@@ -161,7 +160,8 @@ async function main(): Promise<void> {
       }
 
       // --- Detect if content changed ---
-      const contentChanged = raw !== monitoring.lastLines.join('\n');
+      const currentJoined = currentLines.join('\n');
+      const contentChanged = currentJoined !== monitoring.lastLines.join('\n');
 
       if (contentChanged) {
         monitoring.stable = 0;
@@ -186,8 +186,7 @@ async function main(): Promise<void> {
 
       // Permission dialog appeared
       if (!state.isYoloMode && newState === 'permission' && prevState !== 'permission') {
-        // Flush any pending responses first
-        await flushNewResponses(currentLines, monitoring, state, bot);
+        await flushScreenDiff(currentLines, monitoring, state, bot);
 
         const perm = extractPermission(currentLines);
         if (perm && state.lastPermHash === null) {
@@ -213,7 +212,7 @@ async function main(): Promise<void> {
 
       // AskUserQuestion appeared
       if (newState === 'asking' && prevState !== 'asking') {
-        await flushNewResponses(currentLines, monitoring, state, bot);
+        await flushScreenDiff(currentLines, monitoring, state, bot);
 
         const askQuestion = extractAskQuestion(currentLines);
         if (askQuestion && state.lastAskQuestion === null) {
@@ -251,7 +250,7 @@ async function main(): Promise<void> {
         const planChange = detectPlanChange(newLines);
 
         if (planChange === 'entered' && !state.inPlanMode) {
-          await flushNewResponses(currentLines, monitoring, state, bot);
+          await flushScreenDiff(currentLines, monitoring, state, bot);
           state.inPlanMode = true;
           bot.sendMessage(
             state.chatId!,
@@ -273,9 +272,9 @@ async function main(): Promise<void> {
       // Update state
       monitoring.claudeState = newState;
 
-      // --- Flush responses when content is stable ---
+      // --- Flush screen diff when content is stable ---
       if (monitoring.stable === STABILITY && !monitoring.flushed) {
-        await flushNewResponses(currentLines, monitoring, state, bot);
+        await flushScreenDiff(currentLines, monitoring, state, bot);
       }
     } catch (err) {
       console.error('Erreur monitoring:', (err as Error).message);
@@ -284,10 +283,10 @@ async function main(): Promise<void> {
 }
 
 /**
- * Extract and send only NEW responses (lines after processedIndex).
- * Updates processedIndex after processing.
+ * Send new terminal lines as HTML <pre> blocks.
+ * Trims terminal chrome (separators, empty prompt, hints) from the end.
  */
-async function flushNewResponses(
+async function flushScreenDiff(
   currentLines: string[],
   monitoring: MonitoringState,
   state: AppState,
@@ -298,20 +297,25 @@ async function flushNewResponses(
 
   // Get new lines since last processing
   const newLines = currentLines.slice(monitoring.processedIndex);
-  if (newLines.length === 0) return;
+  if (newLines.length === 0) {
+    monitoring.processedIndex = currentLines.length;
+    return;
+  }
 
-  const responses = extractResponses(newLines);
-  for (const resp of responses) {
-    const normalized = normalizeForComparison(resp);
-    if (resp && !state.sentResponses.has(normalized)) {
-      state.sentResponses.add(normalized);
-      for (const chunk of splitMessage(resp)) {
-        try {
-          await bot.sendMessage(state.chatId!, chunk);
-        } catch (e) {
-          console.error('Erreur envoi:', (e as Error).message);
-        }
-      }
+  // Trim terminal chrome from end
+  const trimmed = trimTerminalChrome(newLines);
+  if (trimmed.length === 0) {
+    monitoring.processedIndex = currentLines.length;
+    return;
+  }
+
+  // Escape HTML and send as <pre> chunks
+  const escaped = escapeHtml(trimmed.join('\n'));
+  for (const chunk of splitMessage(escaped, 4000, true)) {
+    try {
+      await bot.sendMessage(state.chatId!, chunk, { parse_mode: 'HTML' });
+    } catch (e) {
+      console.error('Erreur envoi:', (e as Error).message);
     }
   }
 

@@ -4,9 +4,8 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.stripAnsi = stripAnsi;
-exports.cleanResponse = cleanResponse;
+exports.escapeHtml = escapeHtml;
 exports.splitMessage = splitMessage;
-exports.normalizeForComparison = normalizeForComparison;
 exports.isAuthorized = isAuthorized;
 function stripAnsi(text) {
     return text
@@ -14,53 +13,33 @@ function stripAnsi(text) {
         .replace(/\x1b\].*?(\x07|\x1b\\)/g, '')
         .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
 }
-function isTableLine(line) {
-    return /[┌┐└┘├┤┬┴┼╋┏┓┗┛┣┫┳┻╂]/.test(line) ||
-        /^[│┃].*[│┃]$/.test(line.trim());
+function escapeHtml(text) {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
-function cleanResponse(text) {
-    const emojiRegex = /^(\p{Emoji_Presentation}|\p{Emoji}\uFE0F)/u;
-    const borderRegex = /^[\s─━═░▒▓█▀▄⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◓◑◒●○◉◎⏺\-_=~`]*$/;
-    let lines = text.split('\n')
-        .filter(line => {
-        if (isTableLine(line))
-            return true;
-        if (borderRegex.test(line))
-            return false;
-        return true;
-    })
-        .map(line => {
-        if (isTableLine(line))
-            return line;
-        return line.replace(/^[│┃]\s*|\s*[│┃]$/g, '');
-    })
-        .map(line => {
-        if (isTableLine(line))
-            return line;
-        return line.replace(/^[ \t]+/, '');
-    })
-        .map(line => {
-        if (isTableLine(line))
-            return line;
-        return line.replace(/  +/g, ' ');
-    });
-    const result = [];
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const prevLine = lines[i - 1];
-        if (emojiRegex.test(line) && prevLine && prevLine.trim() !== '') {
-            if (!emojiRegex.test(prevLine)) {
-                result.push('');
+/**
+ * Split a message into chunks that fit Telegram's limit.
+ * When wrapPre is true, each chunk is wrapped in <pre>...</pre> and split by lines.
+ */
+function splitMessage(text, maxLen = 4000, wrapPre = false) {
+    if (wrapPre) {
+        // Reserve space for <pre> and </pre> tags (11 chars)
+        const effectiveMax = maxLen - 11;
+        const lines = text.split('\n');
+        const chunks = [];
+        let current = '';
+        for (const line of lines) {
+            if (current.length + line.length + 1 > effectiveMax && current) {
+                chunks.push('<pre>' + current + '</pre>');
+                current = line;
+            }
+            else {
+                current += (current ? '\n' : '') + line;
             }
         }
-        result.push(line);
+        if (current)
+            chunks.push('<pre>' + current + '</pre>');
+        return chunks;
     }
-    return result
-        .join('\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-}
-function splitMessage(text, maxLen = 4000) {
     if (text.length <= maxLen)
         return [text];
     const chunks = [];
@@ -78,9 +57,6 @@ function splitMessage(text, maxLen = 4000) {
     if (current)
         chunks.push(current.trim());
     return chunks;
-}
-function normalizeForComparison(text) {
-    return text.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 function isAuthorized(uid, allowedUserId) {
     return !allowedUserId || String(uid) === allowedUserId;

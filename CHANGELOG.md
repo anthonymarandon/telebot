@@ -4,6 +4,26 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.4.0] - 2026-02-07
+
+### Modifié
+- Refonte du monitoring : envoi direct du diff terminal (screen-based) au lieu du parsing regex des réponses
+- Remplacement de `flushNewResponses` par `flushScreenDiff` (contenu terminal brut en `<pre>` HTML)
+- Migration de `/screen` vers le format HTML `<pre>` (plus de problèmes de backticks)
+- Simplification de la déduplication (processedIndex seul, suppression de sentResponses)
+
+### Supprimé
+- `extractResponses()`, `PROGRESS_PATTERNS`, `isProgressMessage()`, `isValidResponse()` (parser.ts)
+- `cleanResponse()`, `isTableLine()`, `normalizeForComparison()` (utils.ts)
+- `sentResponses: Set<string>` (types.ts)
+
+### Ajouté
+- `escapeHtml()` pour l'échappement HTML des blocs `<pre>`
+- `trimTerminalChrome()` pour nettoyer le bruit terminal en fin de diff
+- Paramètre `wrapPre` dans `splitMessage()` pour le découpage en blocs `<pre>`
+
+---
+
 ## [1.3.0] - 2026-02-07
 
 ### Ajouté
