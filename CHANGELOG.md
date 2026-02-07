@@ -4,6 +4,17 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.2.0] - 2026-02-07
+
+### Ajouté
+- Détection du mode Plan de Claude Code (entrée/sortie) avec notifications Telegram formatées
+- Détection des questions interactives AskUserQuestion avec affichage des options sur Telegram
+- Navigation automatique des menus TUI via tmux (`tmuxSendKey`, `tmuxSelectOption`)
+- Support des réponses par numéro et texte libre pour AskUserQuestion
+- Types `AskUserQuestionInfo`, `AskOption` et champs `lastAskQuestion`, `inPlanMode` dans AppState
+
+---
+
 ## [1.1.1] - 2026-02-06
 
 ### Corrigé

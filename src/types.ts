@@ -10,10 +10,26 @@ export interface TelebotConfig {
   SETUP_CODE?: string;
 }
 
+export interface AskOption {
+  num: number;
+  label: string;
+  description: string;
+}
+
+export interface AskUserQuestionInfo {
+  header: string;
+  question: string;
+  options: AskOption[];
+  hasTypeOption: boolean;
+  cursorPos: number;
+}
+
 export interface AppState {
   chatId: number | null;
   sentResponses: Set<string>;
   lastPermHash: string | null;
+  lastAskQuestion: AskUserQuestionInfo | null;
+  inPlanMode: boolean;
   isYoloMode: boolean;
   userId: string;
   setupCode: string;

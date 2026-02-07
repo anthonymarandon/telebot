@@ -7,7 +7,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { AppState, MonitoringState, BotContext } from './types';
 import { loadConfig, ensureSettings, CONFIG_FILE, TELEBOT_DIR } from './config';
 import { tmuxExists, tmuxRead } from './tmux';
-import { extractResponses, detectPermission } from './parser';
+import { extractResponses, detectPermission, detectPlanMode, detectAskUserQuestion } from './parser';
 import { splitMessage, normalizeForComparison } from './utils';
 import {
   handleStart,
@@ -68,6 +68,8 @@ async function main(): Promise<void> {
     chatId: null,
     sentResponses: new Set<string>(),
     lastPermHash: null,
+    lastAskQuestion: null,
+    inPlanMode: false,
     isYoloMode: false,
     userId: config.TELEGRAM_USER_ID || '',
     setupCode: config.SETUP_CODE || '',
@@ -156,6 +158,56 @@ async function main(): Promise<void> {
           // Permission dialog gone (user responded) - reset for next one
           state.lastPermHash = null;
         }
+      }
+
+      // Plan Mode detection
+      const planStatus = detectPlanMode(current);
+      if (planStatus === 'entered' && !state.inPlanMode) {
+        state.inPlanMode = true;
+        bot.sendMessage(
+          state.chatId!,
+          '📋 *Mode Plan activé*\n\n' +
+            'Claude explore et conçoit une approche d\'implémentation.\n' +
+            'Le plan s\'affichera quand il sera prêt.',
+          { parse_mode: 'Markdown' }
+        );
+      } else if (planStatus === 'exited' && state.inPlanMode) {
+        state.inPlanMode = false;
+        bot.sendMessage(
+          state.chatId!,
+          '✅ *Mode Plan terminé*\n\nClaude reprend l\'exécution.',
+          { parse_mode: 'Markdown' }
+        );
+      } else if (planStatus === null && state.inPlanMode) {
+        // Plan mode indicators no longer visible (scrolled away) - keep state
+      }
+
+      // AskUserQuestion detection
+      const askQuestion = detectAskUserQuestion(current);
+      if (askQuestion && state.lastAskQuestion === null) {
+        state.lastAskQuestion = askQuestion;
+
+        let optionsText = askQuestion.options
+          .map(o => {
+            const desc = o.description ? `\n     _${o.description}_` : '';
+            return `\`${o.num}\` → ${o.label}${desc}`;
+          })
+          .join('\n');
+
+        const freeText = askQuestion.hasTypeOption
+          ? '\n\n💬 _Ou envoie du texte libre pour répondre._'
+          : '';
+
+        bot.sendMessage(
+          state.chatId!,
+          `❓ *${askQuestion.header}*\n\n` +
+            `${askQuestion.question}\n\n` +
+            `${optionsText}${freeText}`,
+          { parse_mode: 'Markdown' }
+        );
+      } else if (!askQuestion && state.lastAskQuestion !== null) {
+        // Question answered/dismissed - reset
+        state.lastAskQuestion = null;
       }
 
       // Content changed

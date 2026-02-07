@@ -69,6 +69,31 @@ export function tmuxSend(text: string): void {
   execSync(`tmux send-keys -t ${TMUX_SESSION} Enter`);
 }
 
+/**
+ * Send raw key presses to tmux (for TUI menu navigation)
+ * Accepts tmux key names: Down, Up, Enter, Escape, etc.
+ */
+export function tmuxSendKey(...keys: string[]): void {
+  for (const key of keys) {
+    execSync(`tmux send-keys -t ${TMUX_SESSION} ${key}`);
+  }
+}
+
+/**
+ * Navigate a TUI menu and select an option.
+ * Moves from cursorPos to targetOption using Up/Down, then presses Enter.
+ */
+export function tmuxSelectOption(targetOption: number, cursorPos: number): void {
+  const delta = targetOption - cursorPos;
+  const key = delta > 0 ? 'Down' : 'Up';
+  const steps = Math.abs(delta);
+
+  for (let i = 0; i < steps; i++) {
+    tmuxSendKey(key);
+  }
+  tmuxSendKey('Enter');
+}
+
 export function tmuxRead(): string {
   try {
     const output = execSync(`tmux capture-pane -t ${TMUX_SESSION} -p -S -100`, {

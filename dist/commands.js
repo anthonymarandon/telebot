@@ -13,6 +13,7 @@ exports.handleMessage = handleMessage;
 const utils_1 = require("./utils");
 const config_1 = require("./config");
 const tmux_1 = require("./tmux");
+const platform_1 = require("./platform");
 // /start
 async function handleStart(msg, ctx) {
     const { bot, state } = ctx;
@@ -59,6 +60,8 @@ function handleRestart(msg, ctx) {
     (0, tmux_1.tmuxKillAll)();
     state.sentResponses.clear();
     state.lastPermHash = null;
+    state.lastAskQuestion = null;
+    state.inPlanMode = false;
     state.isYoloMode = false;
     bot.sendMessage(msg.chat.id, '🔄 Session terminée. Envoie un message pour redémarrer.');
 }
@@ -69,6 +72,8 @@ async function handleYolo(msg, ctx) {
         return;
     state.sentResponses.clear();
     state.lastPermHash = null;
+    state.lastAskQuestion = null;
+    state.inPlanMode = false;
     state.isYoloMode = true;
     state.chatId = msg.chat.id;
     try {
@@ -91,6 +96,8 @@ function handleStop(msg, ctx) {
     (0, tmux_1.tmuxKillAll)();
     state.sentResponses.clear();
     state.lastPermHash = null;
+    state.lastAskQuestion = null;
+    state.inPlanMode = false;
     state.isYoloMode = false;
     state.chatId = null;
     bot.sendMessage(msg.chat.id, '🛑 Session Claude arrêtée.');
@@ -190,6 +197,31 @@ async function handleMessage(msg, ctx) {
             bot.sendMessage(state.chatId, '⚠️ Claude met du temps à démarrer... Le message sera envoyé dès qu\'il est prêt.');
             await (0, tmux_1.waitForClaude)(30000);
         }
+    }
+    // Handle AskUserQuestion response
+    if (state.lastAskQuestion) {
+        const ask = state.lastAskQuestion;
+        const num = parseInt(text);
+        // Valid option number
+        const validNums = ask.options.map(o => o.num);
+        if (!isNaN(num) && validNums.includes(num)) {
+            (0, tmux_1.tmuxSelectOption)(num, ask.cursorPos);
+            state.lastAskQuestion = null;
+            return;
+        }
+        // Free text response → select "Type something" option, then type
+        if (ask.hasTypeOption) {
+            // "Type something" is the option right after the last real option
+            const typeOptionNum = Math.max(...validNums) + 1;
+            (0, tmux_1.tmuxSelectOption)(typeOptionNum, ask.cursorPos);
+            await (0, platform_1.sleep)(300);
+            (0, tmux_1.tmuxSend)(text);
+            state.lastAskQuestion = null;
+            return;
+        }
+        // No type option and invalid number - inform user
+        bot.sendMessage(state.chatId, `⚠️ Choisis un numéro parmi : ${validNums.join(', ')}`);
+        return;
     }
     (0, tmux_1.tmuxSend)(text);
 }

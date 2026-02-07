@@ -3,6 +3,7 @@
  */
 
 import { cleanResponse } from './utils';
+import { AskUserQuestionInfo, AskOption } from './types';
 
 // Patterns de progression Claude à ignorer
 export const PROGRESS_PATTERNS: RegExp[] = [
@@ -61,6 +62,10 @@ export const PROGRESS_PATTERNS: RegExp[] = [
   /^Bash /i,
   /^WebFetch/i,
   /^WebSearch/i,
+  // Plan mode
+  /^Entered plan mode/i,
+  /^Exited plan mode/i,
+  /^Claude is now exploring/i,
 ];
 
 export function isProgressMessage(text: string): boolean {
@@ -172,4 +177,106 @@ export function detectPermission(text: string): PermissionInfo | null {
   // Stable hash based on context (not raw text that may contain animations)
   const hash = `perm:${context.slice(0, 200)}`;
   return { hash, context };
+}
+
+// ===== PLAN MODE DETECTION =====
+
+export function detectPlanMode(text: string): 'entered' | 'exited' | null {
+  const lines = text.split('\n');
+  const last = lines.slice(-40);
+
+  for (let i = last.length - 1; i >= 0; i--) {
+    const line = last[i].trim();
+    if (/Entered plan mode/i.test(line)) return 'entered';
+    if (/Exited plan mode/i.test(line)) return 'exited';
+  }
+  return null;
+}
+
+// ===== ASK USER QUESTION DETECTION =====
+
+export function detectAskUserQuestion(text: string): AskUserQuestionInfo | null {
+  const lines = text.split('\n');
+
+  // Find footer: "Enter to select · ↑/↓ to navigate"
+  const footerIdx = lines.findIndex(l =>
+    l.includes('Enter to select') && l.includes('to navigate')
+  );
+  if (footerIdx === -1) return null;
+
+  // Find ☐ header (search backwards from footer)
+  let headerIdx = -1;
+  for (let i = footerIdx - 1; i >= 0; i--) {
+    if (/☐/.test(lines[i])) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx === -1) return null;
+
+  const header = lines[headerIdx].replace(/.*☐\s*/, '').trim();
+
+  // Find first numbered option
+  let firstOptIdx = -1;
+  for (let i = headerIdx + 1; i < footerIdx; i++) {
+    if (/^\s*[❯]?\s*\d+\.\s/.test(lines[i])) {
+      firstOptIdx = i;
+      break;
+    }
+  }
+  if (firstOptIdx === -1) return null;
+
+  // Extract question text (between header and first option)
+  const questionLines = lines.slice(headerIdx + 1, firstOptIdx).filter(l => l.trim());
+  const question = questionLines.join('\n').trim();
+  if (!question) return null;
+
+  // Extract options (stop at separator ────)
+  const options: AskOption[] = [];
+  let cursorPos = 1;
+  let i = firstOptIdx;
+
+  while (i < footerIdx) {
+    const line = lines[i];
+
+    // Stop at separator line
+    if (/^[─\s]{3,}$/.test(line.trim()) && line.includes('────')) break;
+
+    const optMatch = line.match(/^\s*([❯])?\s*(\d+)\.\s+(.+)/);
+    if (optMatch) {
+      const num = parseInt(optMatch[2]);
+      const isSelected = optMatch[1] === '❯';
+      const label = optMatch[3].trim();
+
+      if (isSelected) cursorPos = num;
+
+      // Skip "Type something" (it's the auto-added "Other" option)
+      if (/^type something/i.test(label)) {
+        i++;
+        continue;
+      }
+
+      // Check for description on next line (indented, not another option)
+      let description = '';
+      if (i + 1 < footerIdx) {
+        const nextLine = lines[i + 1];
+        if (/^\s{4,}/.test(nextLine) && !/^\s*[❯]?\s*\d+\./.test(nextLine)) {
+          description = nextLine.trim();
+          i++;
+        }
+      }
+
+      options.push({ num, label, description });
+    }
+    i++;
+  }
+
+  if (options.length === 0) return null;
+
+  // Check if "Type something" option exists
+  const hasTypeOption = lines.slice(firstOptIdx, footerIdx).some(l =>
+    /\d+\.\s+Type something/i.test(l)
+  );
+
+  return { header, question, options, hasTypeOption, cursorPos };
 }

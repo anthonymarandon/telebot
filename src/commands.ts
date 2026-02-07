@@ -6,7 +6,8 @@ import TelegramBot from 'node-telegram-bot-api';
 import { BotContext } from './types';
 import { isAuthorized } from './utils';
 import { saveUserId, clearSetupCode } from './config';
-import { tmuxKillAll, tmuxCreate, tmuxExists, tmuxSend, waitForClaude } from './tmux';
+import { tmuxKillAll, tmuxCreate, tmuxExists, tmuxSend, tmuxSelectOption, tmuxSendKey, waitForClaude } from './tmux';
+import { sleep } from './platform';
 
 // /start
 export async function handleStart(msg: TelegramBot.Message, ctx: BotContext): Promise<void> {
@@ -77,6 +78,8 @@ export function handleRestart(msg: TelegramBot.Message, ctx: BotContext): void {
   tmuxKillAll();
   state.sentResponses.clear();
   state.lastPermHash = null;
+  state.lastAskQuestion = null;
+  state.inPlanMode = false;
   state.isYoloMode = false;
 
   bot.sendMessage(msg.chat.id, '🔄 Session terminée. Envoie un message pour redémarrer.');
@@ -90,6 +93,8 @@ export async function handleYolo(msg: TelegramBot.Message, ctx: BotContext): Pro
 
   state.sentResponses.clear();
   state.lastPermHash = null;
+  state.lastAskQuestion = null;
+  state.inPlanMode = false;
   state.isYoloMode = true;
   state.chatId = msg.chat.id;
 
@@ -119,6 +124,8 @@ export function handleStop(msg: TelegramBot.Message, ctx: BotContext): void {
   tmuxKillAll();
   state.sentResponses.clear();
   state.lastPermHash = null;
+  state.lastAskQuestion = null;
+  state.inPlanMode = false;
   state.isYoloMode = false;
   state.chatId = null;
 
@@ -254,6 +261,38 @@ export async function handleMessage(msg: TelegramBot.Message, ctx: BotContext): 
       bot.sendMessage(state.chatId!, '⚠️ Claude met du temps à démarrer... Le message sera envoyé dès qu\'il est prêt.');
       await waitForClaude(30000);
     }
+  }
+
+  // Handle AskUserQuestion response
+  if (state.lastAskQuestion) {
+    const ask = state.lastAskQuestion;
+    const num = parseInt(text);
+
+    // Valid option number
+    const validNums = ask.options.map(o => o.num);
+    if (!isNaN(num) && validNums.includes(num)) {
+      tmuxSelectOption(num, ask.cursorPos);
+      state.lastAskQuestion = null;
+      return;
+    }
+
+    // Free text response → select "Type something" option, then type
+    if (ask.hasTypeOption) {
+      // "Type something" is the option right after the last real option
+      const typeOptionNum = Math.max(...validNums) + 1;
+      tmuxSelectOption(typeOptionNum, ask.cursorPos);
+      await sleep(300);
+      tmuxSend(text);
+      state.lastAskQuestion = null;
+      return;
+    }
+
+    // No type option and invalid number - inform user
+    bot.sendMessage(
+      state.chatId!,
+      `⚠️ Choisis un numéro parmi : ${validNums.join(', ')}`,
+    );
+    return;
   }
 
   tmuxSend(text);

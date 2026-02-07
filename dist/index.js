@@ -56,6 +56,8 @@ async function main() {
         chatId: null,
         sentResponses: new Set(),
         lastPermHash: null,
+        lastAskQuestion: null,
+        inPlanMode: false,
         isYoloMode: false,
         userId: config.TELEGRAM_USER_ID || '',
         setupCode: config.SETUP_CODE || '',
@@ -129,6 +131,42 @@ async function main() {
                     // Permission dialog gone (user responded) - reset for next one
                     state.lastPermHash = null;
                 }
+            }
+            // Plan Mode detection
+            const planStatus = (0, parser_1.detectPlanMode)(current);
+            if (planStatus === 'entered' && !state.inPlanMode) {
+                state.inPlanMode = true;
+                bot.sendMessage(state.chatId, '📋 *Mode Plan activé*\n\n' +
+                    'Claude explore et conçoit une approche d\'implémentation.\n' +
+                    'Le plan s\'affichera quand il sera prêt.', { parse_mode: 'Markdown' });
+            }
+            else if (planStatus === 'exited' && state.inPlanMode) {
+                state.inPlanMode = false;
+                bot.sendMessage(state.chatId, '✅ *Mode Plan terminé*\n\nClaude reprend l\'exécution.', { parse_mode: 'Markdown' });
+            }
+            else if (planStatus === null && state.inPlanMode) {
+                // Plan mode indicators no longer visible (scrolled away) - keep state
+            }
+            // AskUserQuestion detection
+            const askQuestion = (0, parser_1.detectAskUserQuestion)(current);
+            if (askQuestion && state.lastAskQuestion === null) {
+                state.lastAskQuestion = askQuestion;
+                let optionsText = askQuestion.options
+                    .map(o => {
+                    const desc = o.description ? `\n     _${o.description}_` : '';
+                    return `\`${o.num}\` → ${o.label}${desc}`;
+                })
+                    .join('\n');
+                const freeText = askQuestion.hasTypeOption
+                    ? '\n\n💬 _Ou envoie du texte libre pour répondre._'
+                    : '';
+                bot.sendMessage(state.chatId, `❓ *${askQuestion.header}*\n\n` +
+                    `${askQuestion.question}\n\n` +
+                    `${optionsText}${freeText}`, { parse_mode: 'Markdown' });
+            }
+            else if (!askQuestion && state.lastAskQuestion !== null) {
+                // Question answered/dismissed - reset
+                state.lastAskQuestion = null;
             }
             // Content changed
             if (current !== monitoring.previous) {

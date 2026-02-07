@@ -9,6 +9,8 @@ exports.tmuxKillAll = tmuxKillAll;
 exports.tmuxCreate = tmuxCreate;
 exports.cleanupContext = cleanupContext;
 exports.tmuxSend = tmuxSend;
+exports.tmuxSendKey = tmuxSendKey;
+exports.tmuxSelectOption = tmuxSelectOption;
 exports.tmuxRead = tmuxRead;
 exports.waitForClaude = waitForClaude;
 const child_process_1 = require("child_process");
@@ -71,6 +73,28 @@ function tmuxSend(text) {
     const escaped = text.replace(/'/g, "'\\''");
     (0, child_process_1.execSync)(`tmux send-keys -t ${exports.TMUX_SESSION} -l '${escaped}'`);
     (0, child_process_1.execSync)(`tmux send-keys -t ${exports.TMUX_SESSION} Enter`);
+}
+/**
+ * Send raw key presses to tmux (for TUI menu navigation)
+ * Accepts tmux key names: Down, Up, Enter, Escape, etc.
+ */
+function tmuxSendKey(...keys) {
+    for (const key of keys) {
+        (0, child_process_1.execSync)(`tmux send-keys -t ${exports.TMUX_SESSION} ${key}`);
+    }
+}
+/**
+ * Navigate a TUI menu and select an option.
+ * Moves from cursorPos to targetOption using Up/Down, then presses Enter.
+ */
+function tmuxSelectOption(targetOption, cursorPos) {
+    const delta = targetOption - cursorPos;
+    const key = delta > 0 ? 'Down' : 'Up';
+    const steps = Math.abs(delta);
+    for (let i = 0; i < steps; i++) {
+        tmuxSendKey(key);
+    }
+    tmuxSendKey('Enter');
 }
 function tmuxRead() {
     try {
