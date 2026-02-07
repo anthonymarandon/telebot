@@ -24,6 +24,8 @@ export interface AskUserQuestionInfo {
   cursorPos: number;
 }
 
+export type ClaudeState = 'idle' | 'working' | 'permission' | 'asking';
+
 export interface AppState {
   chatId: number | null;
   sentResponses: Set<string>;
@@ -36,16 +38,20 @@ export interface AppState {
 }
 
 export interface MonitoringState {
-  previous: string;
+  /** Lines from last tmux read (split by \n) */
+  lastLines: string[];
+  /** Number of lines already processed */
+  processedIndex: number;
+  /** Current detected state of Claude */
+  claudeState: ClaudeState;
+  /** Stability counter (how many polls content unchanged) */
   stable: number;
-  processed: boolean;
+  /** Whether current stable content has been flushed */
+  flushed: boolean;
+  /** Whether initial sync is done */
   synced: boolean;
+  /** Timestamp of last typing indicator sent */
   lastTyping: number;
-}
-
-export interface PermissionDetection {
-  type: 'perm' | 'yn';
-  hash: string;
 }
 
 export interface BotContext {

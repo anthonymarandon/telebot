@@ -52,7 +52,7 @@ Dépôt source:
 | `src/types.ts` | Interfaces et types TypeScript |
 | `src/config.ts` | Gestion de config.env |
 | `src/tmux.ts` | Opérations tmux (create, send, read) |
-| `src/parser.ts` | Parsing des réponses Claude |
+| `src/parser.ts` | Détection d'état + parsing des réponses Claude |
 | `src/utils.ts` | Utilitaires (stripAnsi, splitMessage) |
 | `src/commands.ts` | Handlers des commandes Telegram |
 | `dist/` | Fichiers JavaScript compilés |
@@ -85,6 +85,7 @@ Dépôt source:
 - `/start` - Démarrer et s'authentifier
 - `/restart` - Redémarrer la session Claude
 - `/yolo` - Mode sans permissions (dangereux)
+- `/screen` - Voir les 100 dernières lignes du terminal (texte brut)
 - `/stop` - Arrêter la session
 - `/help` - Aide
 

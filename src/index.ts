@@ -1,13 +1,24 @@
 #!/usr/bin/env node
 /**
  * Telebot - Bot Telegram pour Claude Code via tmux
+ *
+ * Monitoring basé sur le diff de lignes :
+ * - On ne traite que les NOUVELLES lignes à chaque cycle
+ * - Machine à états : idle / working / permission / asking
+ * - Anti-spam : chaque réponse n'est envoyée qu'une seule fois
  */
 
 import TelegramBot from 'node-telegram-bot-api';
 import { AppState, MonitoringState, BotContext } from './types';
 import { loadConfig, ensureSettings, CONFIG_FILE, TELEBOT_DIR } from './config';
 import { tmuxExists, tmuxRead } from './tmux';
-import { extractResponses, detectPermission, detectPlanMode, detectAskUserQuestion } from './parser';
+import {
+  detectState,
+  detectPlanChange,
+  extractResponses,
+  extractPermission,
+  extractAskQuestion,
+} from './parser';
 import { splitMessage, normalizeForComparison } from './utils';
 import {
   handleStart,
@@ -16,6 +27,7 @@ import {
   handleStop,
   handleHelp,
   handleConfig,
+  handleScreen,
   handleMessage,
 } from './commands';
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
@@ -77,9 +89,11 @@ async function main(): Promise<void> {
 
   // Monitoring state
   const monitoring: MonitoringState = {
-    previous: '',
+    lastLines: [],
+    processedIndex: 0,
+    claudeState: 'idle',
     stable: 0,
-    processed: false,
+    flushed: false,
     synced: false,
     lastTyping: 0,
   };
@@ -102,6 +116,7 @@ async function main(): Promise<void> {
     { command: 'config', description: 'Configurer le bot' },
     { command: 'restart', description: 'Redémarrer Claude' },
     { command: 'yolo', description: 'Mode sans permissions ⚡' },
+    { command: 'screen', description: 'Voir le terminal' },
     { command: 'stop', description: 'Arrêter la session Claude' },
     { command: 'help', description: 'Aide' },
   ];
@@ -114,34 +129,14 @@ async function main(): Promise<void> {
   bot.onText(/\/start/, msg => handleStart(msg, ctx));
   bot.onText(/\/restart/, msg => handleRestart(msg, ctx));
   bot.onText(/\/yolo/, msg => handleYolo(msg, ctx));
+  bot.onText(/\/screen/, msg => handleScreen(msg, ctx));
   bot.onText(/\/stop/, msg => handleStop(msg, ctx));
   bot.onText(/\/help/, msg => handleHelp(msg, ctx));
   bot.onText(/\/config/, msg => handleConfig(msg, ctx));
 
   bot.on('message', msg => handleMessage(msg, ctx));
 
-  // Send pending responses to Telegram
-  async function flushResponses(content: string): Promise<void> {
-    if (monitoring.processed) return;
-    monitoring.processed = true;
-
-    const responses = extractResponses(content);
-    for (const resp of responses) {
-      const normalized = normalizeForComparison(resp);
-      if (resp && !state.sentResponses.has(normalized)) {
-        state.sentResponses.add(normalized);
-        for (const chunk of splitMessage(resp)) {
-          try {
-            await bot.sendMessage(state.chatId!, chunk);
-          } catch (e) {
-            console.error('Erreur envoi:', (e as Error).message);
-          }
-        }
-      }
-    }
-  }
-
-  // Monitoring loop
+  // ===== MONITORING LOOP =====
   setInterval(async () => {
     try {
       if (!state.chatId || !tmuxExists()) {
@@ -149,22 +144,54 @@ async function main(): Promise<void> {
         return;
       }
 
-      const current = tmuxRead();
+      const raw = tmuxRead();
+      const currentLines = raw.split('\n');
 
-      // Initial sync
+      // --- Initial sync: mark all existing content as already processed ---
       if (!monitoring.synced) {
-        extractResponses(current).forEach(r => state.sentResponses.add(normalizeForComparison(r)));
+        // Index all existing responses so we don't re-send them
+        extractResponses(currentLines).forEach(r =>
+          state.sentResponses.add(normalizeForComparison(r))
+        );
+        monitoring.lastLines = currentLines;
+        monitoring.processedIndex = currentLines.length;
         monitoring.synced = true;
-        monitoring.previous = current;
+        monitoring.claudeState = detectState(currentLines);
         return;
       }
 
-      // Permission detection - runs on every iteration (independent of stability)
-      if (!state.isYoloMode) {
-        const perm = detectPermission(current);
+      // --- Detect if content changed ---
+      const contentChanged = raw !== monitoring.lastLines.join('\n');
+
+      if (contentChanged) {
+        monitoring.stable = 0;
+        monitoring.flushed = false;
+        monitoring.lastLines = currentLines;
+
+        // Send typing indicator (throttled to every 4s)
+        const now = Date.now();
+        if (now - monitoring.lastTyping > 4000) {
+          bot.sendChatAction(state.chatId, 'typing').catch(() => {});
+          monitoring.lastTyping = now;
+        }
+      } else {
+        monitoring.stable++;
+      }
+
+      // --- State detection (runs every cycle) ---
+      const newState = detectState(currentLines);
+      const prevState = monitoring.claudeState;
+
+      // --- Handle state transitions ---
+
+      // Permission dialog appeared
+      if (!state.isYoloMode && newState === 'permission' && prevState !== 'permission') {
+        // Flush any pending responses first
+        await flushNewResponses(currentLines, monitoring, state, bot);
+
+        const perm = extractPermission(currentLines);
         if (perm && state.lastPermHash === null) {
-          await flushResponses(current);
-          state.lastPermHash = 'sent';
+          state.lastPermHash = perm.hash;
           const ctxBlock = perm.context ? `\`\`\`\n${perm.context}\n\`\`\`\n\n` : '';
           bot.sendMessage(
             state.chatId!,
@@ -176,84 +203,120 @@ async function main(): Promise<void> {
               '`3` → Non',
             { parse_mode: 'Markdown' }
           );
-        } else if (!perm && state.lastPermHash !== null) {
-          state.lastPermHash = null;
         }
       }
 
-      // Plan Mode detection
-      const planStatus = detectPlanMode(current);
-      if (planStatus === 'entered' && !state.inPlanMode) {
-        await flushResponses(current);
-        state.inPlanMode = true;
-        bot.sendMessage(
-          state.chatId!,
-          '📋 *Mode Plan activé*\n\n' +
-            'Claude explore et conçoit une approche d\'implémentation.\n' +
-            'Le plan s\'affichera quand il sera prêt.',
-          { parse_mode: 'Markdown' }
-        );
-      } else if (planStatus === 'exited' && state.inPlanMode) {
-        state.inPlanMode = false;
-        bot.sendMessage(
-          state.chatId!,
-          '✅ *Mode Plan terminé*\n\nClaude reprend l\'exécution.',
-          { parse_mode: 'Markdown' }
-        );
+      // Permission dialog disappeared
+      if (prevState === 'permission' && newState !== 'permission') {
+        state.lastPermHash = null;
       }
 
-      // AskUserQuestion detection
-      const askQuestion = detectAskUserQuestion(current);
-      if (askQuestion && state.lastAskQuestion === null) {
-        await flushResponses(current);
-        state.lastAskQuestion = askQuestion;
+      // AskUserQuestion appeared
+      if (newState === 'asking' && prevState !== 'asking') {
+        await flushNewResponses(currentLines, monitoring, state, bot);
 
-        let optionsText = askQuestion.options
-          .map(o => {
-            const desc = o.description ? `\n     _${o.description}_` : '';
-            return `\`${o.num}\` → ${o.label}${desc}`;
-          })
-          .join('\n');
+        const askQuestion = extractAskQuestion(currentLines);
+        if (askQuestion && state.lastAskQuestion === null) {
+          state.lastAskQuestion = askQuestion;
 
-        const freeText = askQuestion.hasTypeOption
-          ? '\n\n💬 _Ou envoie du texte libre pour répondre._'
-          : '';
+          let optionsText = askQuestion.options
+            .map(o => {
+              const desc = o.description ? `\n     _${o.description}_` : '';
+              return `\`${o.num}\` → ${o.label}${desc}`;
+            })
+            .join('\n');
 
-        bot.sendMessage(
-          state.chatId!,
-          `❓ *${askQuestion.header}*\n\n` +
-            `${askQuestion.question}\n\n` +
-            `${optionsText}${freeText}`,
-          { parse_mode: 'Markdown' }
-        );
-      } else if (!askQuestion && state.lastAskQuestion !== null) {
+          const freeText = askQuestion.hasTypeOption
+            ? '\n\n💬 _Ou envoie du texte libre pour répondre._'
+            : '';
+
+          bot.sendMessage(
+            state.chatId!,
+            `❓ *${askQuestion.header}*\n\n` +
+              `${askQuestion.question}\n\n` +
+              `${optionsText}${freeText}`,
+            { parse_mode: 'Markdown' }
+          );
+        }
+      }
+
+      // AskUserQuestion disappeared
+      if (prevState === 'asking' && newState !== 'asking') {
         state.lastAskQuestion = null;
       }
 
-      // Content changed
-      if (current !== monitoring.previous) {
-        monitoring.stable = 0;
-        monitoring.processed = false;
-        monitoring.previous = current;
+      // Plan mode changes (check new lines only)
+      if (contentChanged) {
+        const newLines = currentLines.slice(monitoring.processedIndex);
+        const planChange = detectPlanChange(newLines);
 
-        const now = Date.now();
-        if (now - monitoring.lastTyping > 4000) {
-          bot.sendChatAction(state.chatId, 'typing').catch(() => {});
-          monitoring.lastTyping = now;
+        if (planChange === 'entered' && !state.inPlanMode) {
+          await flushNewResponses(currentLines, monitoring, state, bot);
+          state.inPlanMode = true;
+          bot.sendMessage(
+            state.chatId!,
+            '📋 *Mode Plan activé*\n\n' +
+              'Claude explore et conçoit une approche d\'implémentation.\n' +
+              'Le plan s\'affichera quand il sera prêt.',
+            { parse_mode: 'Markdown' }
+          );
+        } else if (planChange === 'exited' && state.inPlanMode) {
+          state.inPlanMode = false;
+          bot.sendMessage(
+            state.chatId!,
+            '✅ *Mode Plan terminé*\n\nClaude reprend l\'exécution.',
+            { parse_mode: 'Markdown' }
+          );
         }
-        return;
       }
 
-      monitoring.stable++;
+      // Update state
+      monitoring.claudeState = newState;
 
-      // Stable = process responses
-      if (monitoring.stable === STABILITY && !monitoring.processed) {
-        await flushResponses(current);
+      // --- Flush responses when content is stable ---
+      if (monitoring.stable === STABILITY && !monitoring.flushed) {
+        await flushNewResponses(currentLines, monitoring, state, bot);
       }
     } catch (err) {
       console.error('Erreur monitoring:', (err as Error).message);
     }
   }, POLL_INTERVAL);
+}
+
+/**
+ * Extract and send only NEW responses (lines after processedIndex).
+ * Updates processedIndex after processing.
+ */
+async function flushNewResponses(
+  currentLines: string[],
+  monitoring: MonitoringState,
+  state: AppState,
+  bot: TelegramBot
+): Promise<void> {
+  if (monitoring.flushed) return;
+  monitoring.flushed = true;
+
+  // Get new lines since last processing
+  const newLines = currentLines.slice(monitoring.processedIndex);
+  if (newLines.length === 0) return;
+
+  const responses = extractResponses(newLines);
+  for (const resp of responses) {
+    const normalized = normalizeForComparison(resp);
+    if (resp && !state.sentResponses.has(normalized)) {
+      state.sentResponses.add(normalized);
+      for (const chunk of splitMessage(resp)) {
+        try {
+          await bot.sendMessage(state.chatId!, chunk);
+        } catch (e) {
+          console.error('Erreur envoi:', (e as Error).message);
+        }
+      }
+    }
+  }
+
+  // Advance the processed index
+  monitoring.processedIndex = currentLines.length;
 }
 
 main().catch(err => {

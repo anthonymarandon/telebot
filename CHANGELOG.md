@@ -4,6 +4,18 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.3.0] - 2026-02-07
+
+### Ajouté
+- Commande `/screen` : affiche les 100 dernières lignes du terminal en texte brut (zéro dépendance)
+
+### Modifié
+- Refonte du monitoring tmux : système de diff basé sur les nouvelles lignes (plus de re-parsing du buffer entier)
+- Machine à états pour Claude (`idle` / `working` / `permission` / `asking`) avec notifications sur transitions uniquement
+- Anti-spam renforcé : suivi par index de lignes, chaque réponse envoyée une seule fois
+
+---
+
 ## [1.2.1] - 2026-02-07
 
 ### Corrigé

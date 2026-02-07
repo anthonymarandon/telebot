@@ -6,7 +6,8 @@ import TelegramBot from 'node-telegram-bot-api';
 import { BotContext } from './types';
 import { isAuthorized } from './utils';
 import { saveUserId, clearSetupCode } from './config';
-import { tmuxKillAll, tmuxCreate, tmuxExists, tmuxSend, tmuxSelectOption, tmuxSendKey, waitForClaude } from './tmux';
+import { tmuxKillAll, tmuxCreate, tmuxExists, tmuxRead, tmuxSend, tmuxSelectOption, waitForClaude } from './tmux';
+import { splitMessage } from './utils';
 import { sleep } from './platform';
 
 // /start
@@ -71,7 +72,7 @@ export async function handleStart(msg: TelegramBot.Message, ctx: BotContext): Pr
 
 // /restart
 export function handleRestart(msg: TelegramBot.Message, ctx: BotContext): void {
-  const { bot, state } = ctx;
+  const { bot, state, monitoring } = ctx;
 
   if (!isAuthorized(msg.from!.id, state.userId)) return;
 
@@ -81,6 +82,9 @@ export function handleRestart(msg: TelegramBot.Message, ctx: BotContext): void {
   state.lastAskQuestion = null;
   state.inPlanMode = false;
   state.isYoloMode = false;
+  monitoring.synced = false;
+  monitoring.processedIndex = 0;
+  monitoring.lastLines = [];
 
   bot.sendMessage(msg.chat.id, '🔄 Session terminée. Envoie un message pour redémarrer.');
 }
@@ -117,7 +121,7 @@ export async function handleYolo(msg: TelegramBot.Message, ctx: BotContext): Pro
 
 // /stop
 export function handleStop(msg: TelegramBot.Message, ctx: BotContext): void {
-  const { bot, state } = ctx;
+  const { bot, state, monitoring } = ctx;
 
   if (!isAuthorized(msg.from!.id, state.userId)) return;
 
@@ -128,6 +132,9 @@ export function handleStop(msg: TelegramBot.Message, ctx: BotContext): void {
   state.inPlanMode = false;
   state.isYoloMode = false;
   state.chatId = null;
+  monitoring.synced = false;
+  monitoring.processedIndex = 0;
+  monitoring.lastLines = [];
 
   bot.sendMessage(msg.chat.id, '🛑 Session Claude arrêtée.');
 }
@@ -145,6 +152,7 @@ export function handleHelp(msg: TelegramBot.Message, ctx: BotContext): void {
       '`/config` - Configurer le bot\n' +
       '`/restart` - Redémarrer Claude\n' +
       '`/yolo` - Mode sans permissions ⚡\n' +
+      '`/screen` - Voir le terminal\n' +
       '`/stop` - Arrêter Claude\n' +
       '`/help` - Cette aide\n\n' +
       '💡 Envoie un message pour parler à Claude.',
@@ -193,6 +201,30 @@ export function handleConfig(msg: TelegramBot.Message, ctx: BotContext): void {
       '❌ *Non autorisé*\n\n' + 'Ce bot est déjà configuré pour un autre utilisateur.',
       { parse_mode: 'Markdown' }
     );
+  }
+}
+
+// /screen
+export function handleScreen(msg: TelegramBot.Message, ctx: BotContext): void {
+  const { bot, state } = ctx;
+
+  if (!isAuthorized(msg.from!.id, state.userId)) return;
+
+  if (!tmuxExists()) {
+    bot.sendMessage(msg.chat.id, '⚠️ Aucune session Claude active.');
+    return;
+  }
+
+  const content = tmuxRead();
+  if (!content.trim()) {
+    bot.sendMessage(msg.chat.id, '⚠️ Terminal vide.');
+    return;
+  }
+
+  // Send as code block, split if too long for Telegram
+  const formatted = '```\n' + content + '\n```';
+  for (const chunk of splitMessage(formatted)) {
+    bot.sendMessage(msg.chat.id, chunk, { parse_mode: 'Markdown' });
   }
 }
 

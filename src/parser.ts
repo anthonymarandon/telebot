@@ -1,96 +1,116 @@
 /**
- * Parsing des réponses Claude et détection de permissions
+ * Parsing des réponses Claude et détection d'état terminal
+ *
+ * Architecture : on détecte l'état de Claude en analysant les dernières lignes
+ * du terminal tmux. Les réponses sont extraites uniquement depuis les nouvelles
+ * lignes (diff) pour éviter les doublons.
  */
 
 import { cleanResponse } from './utils';
-import { AskUserQuestionInfo, AskOption } from './types';
+import { ClaudeState, AskUserQuestionInfo, AskOption } from './types';
 
-// Patterns de progression Claude à ignorer
-export const PROGRESS_PATTERNS: RegExp[] = [
-  // ===== APPELS D'OUTILS =====
-  /^Write\s*\(/i,
-  /^Read\s*\(/i,
-  /^Edit\s*\(/i,
-  /^Bash\s*\(/i,
-  /^Grep\s*\(/i,
-  /^Glob\s*\(/i,
-  /^Task\s*\(/i,
-  /^WebFetch\s*\(/i,
-  /^WebSearch\s*\(/i,
-  /^TodoWrite\s*\(/i,
-  /^TodoRead\s*\(/i,
-  /^NotebookEdit\s*\(/i,
+// ===== RESPONSE MARKERS =====
+// Claude Code uses ⏺ (older) or ● (v2.1+) to mark response starts
+const RESPONSE_MARKER = /[⏺●]/;
 
-  // ===== RÉSULTATS D'OUTILS =====
+// Prompt marker: Claude is idle and waiting for input
+const PROMPT_MARKER = '❯';
+
+// Spinner characters (indicate Claude is working)
+const SPINNER_CHARS = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◓◑◒]/;
+
+// ===== PROGRESS PATTERNS (tool calls, status messages) =====
+const PROGRESS_PATTERNS: RegExp[] = [
+  // Tool calls
+  /^(Write|Read|Edit|Bash|Grep|Glob|Task|WebFetch|WebSearch|TodoWrite|TodoRead|NotebookEdit)\s*\(/i,
+  // Tool results
   /^⎿/,
   /^…\s*\+\d+\s*lines/i,
   /^\.\.\.\s*\+\d+/i,
-
-  // ===== MESSAGES DE PROGRESSION =====
-  // Opérations fichiers
-  /^Read \d+ files?/i,
-  /^Reading /i,
-  /^Wrote \d+ files?/i,
-  /^Wrote to /i,
-  /^Writing /i,
-  /^Edit \d+ files?/i,
-  /^Edited /i,
-  /^Editing /i,
-  /^Created /i,
-  /^Creating /i,
-  /^Deleted /i,
-  /^Deleting /i,
-  // Recherche
-  /^Searching /i,
-  /^Search(ed)? (for )?\d+/i,
-  /^Found \d+/i,
-  /^Glob /i,
-  /^Grep /i,
-  // Exécution
-  /^Ran /i,
-  /^Running /i,
-  /^Executing /i,
-  // Interface Claude
+  // File operations
+  /^(Read|Wrote|Writing|Edit(ed|ing)?|Creat(ed|ing)|Delet(ed|ing)|Reading)\s+\d*\s*(files?|to\s)/i,
+  // Search
+  /^(Searching|Search(ed)?|Found|Glob|Grep)\s/i,
+  // Execution
+  /^(Ran|Running|Executing)\s/i,
+  // UI
   /^\(ctrl\+/i,
   /^Update Todos/i,
-  /^Task /i,
-  /^Thinking/i,
-  /^Processing/i,
-  // Agents et outils
-  /^Agent /i,
-  /^Tool /i,
-  /^Bash /i,
-  /^WebFetch/i,
-  /^WebSearch/i,
-  // Plan mode
+  /^(Task|Thinking|Processing|Agent|Tool|Bash|WebFetch|WebSearch)\s/i,
+  // Plan mode markers
   /^Entered plan mode/i,
   /^Exited plan mode/i,
   /^Claude is now exploring/i,
 ];
 
-export function isProgressMessage(text: string): boolean {
+function isProgressMessage(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length < 3) return true;
-  return PROGRESS_PATTERNS.some(pattern => pattern.test(trimmed));
+  return PROGRESS_PATTERNS.some(p => p.test(trimmed));
 }
 
-export function isValidResponse(text: string): boolean {
+function isValidResponse(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length < 5) return false;
   if (/^[\s\p{Emoji}\p{P}]+$/u.test(trimmed)) return false;
   return !isProgressMessage(trimmed);
 }
 
-// Regex matching Claude Code response markers (⏺ older versions, ● v2.1+)
-const RESPONSE_MARKER = /[⏺●]/;
+// ===== STATE DETECTION =====
 
-export function extractResponses(text: string): string[] {
+/**
+ * Detect Claude's current state by analyzing the last lines of the terminal.
+ * Priority order: permission > asking > idle > working
+ */
+export function detectState(lines: string[]): ClaudeState {
+  const last30 = lines.slice(-30);
+  const joined = last30.join('\n');
+
+  // 1. Permission dialog? (highest priority - needs user action)
+  if (isPermissionDialog(joined)) return 'permission';
+
+  // 2. AskUserQuestion? (interactive menu visible)
+  if (isAskDialog(last30)) return 'asking';
+
+  // 3. Idle? (prompt visible, Claude waiting for input)
+  // Check last few non-empty lines for the prompt marker
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 5); i--) {
+    const line = lines[i].trim();
+    if (line === '') continue;
+    if (line.includes(PROMPT_MARKER) && !RESPONSE_MARKER.test(line)) return 'idle';
+    break; // Only check the last non-empty line
+  }
+
+  // 4. Default: working
+  return 'working';
+}
+
+/**
+ * Detect if plan mode was entered or exited in new lines
+ */
+export function detectPlanChange(newLines: string[]): 'entered' | 'exited' | null {
+  for (let i = newLines.length - 1; i >= 0; i--) {
+    const line = newLines[i].trim();
+    if (/Entered plan mode/i.test(line)) return 'entered';
+    if (/Exited plan mode/i.test(line)) return 'exited';
+  }
+  return null;
+}
+
+// ===== RESPONSE EXTRACTION (diff-based) =====
+
+/**
+ * Extract Claude's text responses from a set of lines.
+ * Only processes the provided lines (caller should pass only new lines).
+ */
+export function extractResponses(lines: string[]): string[] {
   const responses: string[] = [];
   let current: string[] = [];
   let inResp = false;
 
-  text.split('\n').forEach(line => {
+  for (const line of lines) {
     if (RESPONSE_MARKER.test(line)) {
+      // Flush previous response
       if (current.length) {
         const cleaned = cleanResponse(current.join('\n'));
         if (cleaned && isValidResponse(cleaned)) {
@@ -105,7 +125,8 @@ export function extractResponses(text: string): string[] {
         current = [afterMarker];
         inResp = true;
       }
-    } else if (inResp && (line.includes('❯') || line.startsWith('─────'))) {
+    } else if (inResp && (line.includes(PROMPT_MARKER) || line.startsWith('─────'))) {
+      // End of response
       if (current.length) {
         const cleaned = cleanResponse(current.join('\n'));
         if (cleaned && isValidResponse(cleaned)) {
@@ -117,8 +138,9 @@ export function extractResponses(text: string): string[] {
     } else if (inResp) {
       current.push(line);
     }
-  });
+  }
 
+  // Flush remaining
   if (current.length) {
     const cleaned = cleanResponse(current.join('\n'));
     if (cleaned && isValidResponse(cleaned)) {
@@ -126,37 +148,40 @@ export function extractResponses(text: string): string[] {
     }
   }
 
-  return [...new Set(responses)];
+  return responses;
 }
+
+// ===== PERMISSION DETECTION =====
 
 export interface PermissionInfo {
   hash: string;
   context: string;
 }
 
-export function detectPermission(text: string): PermissionInfo | null {
-  // Filter trailing empty lines before taking last 30
-  const lines = text.split('\n').filter(l => l.trim() !== '');
-  const last = lines.slice(-30).join('\n');
-  // Strip spinner characters for stable matching
-  const clean = last.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◓◑◒]/g, '');
-
-  const isPerm =
+function isPermissionDialog(text: string): boolean {
+  const clean = text.replace(SPINNER_CHARS, '');
+  return (
     clean.includes('Do you want to proceed?') ||
     clean.includes('want to run') ||
-    /\d+\.\s*(Yes|No|Oui|Non)/i.test(clean);
+    /\d+\.\s*(Yes|No|Oui|Non)/i.test(clean) ||
+    clean.includes('Allow') ||
+    /\(y\/n\)|\(yes\/no\)/i.test(clean)
+  );
+}
 
-  const isAllow = clean.includes('Allow');
-  const isYN = /\(y\/n\)|\(yes\/no\)/i.test(clean);
+export function extractPermission(lines: string[]): PermissionInfo | null {
+  const last30 = lines.slice(-30).filter(l => l.trim() !== '');
+  const joined = last30.join('\n');
+  const clean = joined.replace(SPINNER_CHARS, '');
 
-  if (!isPerm && !isAllow && !isYN) return null;
+  if (!isPermissionDialog(clean)) return null;
 
-  // Extract command context from permission dialog
+  // Extract context lines before the permission question
   const cleanLines = clean.split('\n').map(l => l.trim()).filter(
     l => l !== '' && !/^[─━═]+$/.test(l)
   );
-  let context = '';
 
+  let context = '';
   for (let i = 0; i < cleanLines.length; i++) {
     const line = cleanLines[i];
     if (
@@ -165,7 +190,6 @@ export function detectPermission(text: string): PermissionInfo | null {
       line.includes('want to run') ||
       /\(y\/n\)/i.test(line)
     ) {
-      // Take the lines before the question as context (command info)
       const ctxLines = cleanLines.slice(Math.max(0, i - 4), i).filter(
         l => !l.startsWith('Esc ') && !l.startsWith('❯') && !l.match(/^\d+\./) && !/^[─━═]+$/.test(l)
       );
@@ -174,37 +198,24 @@ export function detectPermission(text: string): PermissionInfo | null {
     }
   }
 
-  // Stable hash based on context (not raw text that may contain animations)
   const hash = `perm:${context.slice(0, 200)}`;
   return { hash, context };
 }
 
-// ===== PLAN MODE DETECTION =====
-
-export function detectPlanMode(text: string): 'entered' | 'exited' | null {
-  const lines = text.split('\n');
-  const last = lines.slice(-40);
-
-  for (let i = last.length - 1; i >= 0; i--) {
-    const line = last[i].trim();
-    if (/Entered plan mode/i.test(line)) return 'entered';
-    if (/Exited plan mode/i.test(line)) return 'exited';
-  }
-  return null;
-}
-
 // ===== ASK USER QUESTION DETECTION =====
 
-export function detectAskUserQuestion(text: string): AskUserQuestionInfo | null {
-  const lines = text.split('\n');
+function isAskDialog(lines: string[]): boolean {
+  return lines.some(l => l.includes('Enter to select') && l.includes('to navigate'));
+}
 
-  // Find footer: "Enter to select · ↑/↓ to navigate"
+export function extractAskQuestion(lines: string[]): AskUserQuestionInfo | null {
+  // Find footer
   const footerIdx = lines.findIndex(l =>
     l.includes('Enter to select') && l.includes('to navigate')
   );
   if (footerIdx === -1) return null;
 
-  // Find ☐ header (search backwards from footer)
+  // Find ☐ header (backwards from footer)
   let headerIdx = -1;
   for (let i = footerIdx - 1; i >= 0; i--) {
     if (/☐/.test(lines[i])) {
@@ -226,20 +237,18 @@ export function detectAskUserQuestion(text: string): AskUserQuestionInfo | null 
   }
   if (firstOptIdx === -1) return null;
 
-  // Extract question text (between header and first option)
+  // Question text between header and first option
   const questionLines = lines.slice(headerIdx + 1, firstOptIdx).filter(l => l.trim());
   const question = questionLines.join('\n').trim();
   if (!question) return null;
 
-  // Extract options (stop at separator ────)
+  // Extract options
   const options: AskOption[] = [];
   let cursorPos = 1;
   let i = firstOptIdx;
 
   while (i < footerIdx) {
     const line = lines[i];
-
-    // Stop at separator line
     if (/^[─\s]{3,}$/.test(line.trim()) && line.includes('────')) break;
 
     const optMatch = line.match(/^\s*([❯])?\s*(\d+)\.\s+(.+)/);
@@ -250,13 +259,10 @@ export function detectAskUserQuestion(text: string): AskUserQuestionInfo | null 
 
       if (isSelected) cursorPos = num;
 
-      // Skip "Type something" (it's the auto-added "Other" option)
-      if (/^type something/i.test(label)) {
-        i++;
-        continue;
-      }
+      // Skip "Type something" (auto-added "Other" option)
+      if (/^type something/i.test(label)) { i++; continue; }
 
-      // Check for description on next line (indented, not another option)
+      // Check for description on next line
       let description = '';
       if (i + 1 < footerIdx) {
         const nextLine = lines[i + 1];
@@ -273,7 +279,6 @@ export function detectAskUserQuestion(text: string): AskUserQuestionInfo | null 
 
   if (options.length === 0) return null;
 
-  // Check if "Type something" option exists
   const hasTypeOption = lines.slice(firstOptIdx, footerIdx).some(l =>
     /\d+\.\s+Type something/i.test(l)
   );

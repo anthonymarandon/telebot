@@ -9,10 +9,12 @@ exports.handleYolo = handleYolo;
 exports.handleStop = handleStop;
 exports.handleHelp = handleHelp;
 exports.handleConfig = handleConfig;
+exports.handleScreen = handleScreen;
 exports.handleMessage = handleMessage;
 const utils_1 = require("./utils");
 const config_1 = require("./config");
 const tmux_1 = require("./tmux");
+const utils_2 = require("./utils");
 const platform_1 = require("./platform");
 // /start
 async function handleStart(msg, ctx) {
@@ -54,7 +56,7 @@ async function handleStart(msg, ctx) {
 }
 // /restart
 function handleRestart(msg, ctx) {
-    const { bot, state } = ctx;
+    const { bot, state, monitoring } = ctx;
     if (!(0, utils_1.isAuthorized)(msg.from.id, state.userId))
         return;
     (0, tmux_1.tmuxKillAll)();
@@ -63,6 +65,9 @@ function handleRestart(msg, ctx) {
     state.lastAskQuestion = null;
     state.inPlanMode = false;
     state.isYoloMode = false;
+    monitoring.synced = false;
+    monitoring.processedIndex = 0;
+    monitoring.lastLines = [];
     bot.sendMessage(msg.chat.id, '🔄 Session terminée. Envoie un message pour redémarrer.');
 }
 // /yolo
@@ -90,7 +95,7 @@ async function handleYolo(msg, ctx) {
 }
 // /stop
 function handleStop(msg, ctx) {
-    const { bot, state } = ctx;
+    const { bot, state, monitoring } = ctx;
     if (!(0, utils_1.isAuthorized)(msg.from.id, state.userId))
         return;
     (0, tmux_1.tmuxKillAll)();
@@ -100,6 +105,9 @@ function handleStop(msg, ctx) {
     state.inPlanMode = false;
     state.isYoloMode = false;
     state.chatId = null;
+    monitoring.synced = false;
+    monitoring.processedIndex = 0;
+    monitoring.lastLines = [];
     bot.sendMessage(msg.chat.id, '🛑 Session Claude arrêtée.');
 }
 // /help
@@ -112,6 +120,7 @@ function handleHelp(msg, ctx) {
         '`/config` - Configurer le bot\n' +
         '`/restart` - Redémarrer Claude\n' +
         '`/yolo` - Mode sans permissions ⚡\n' +
+        '`/screen` - Voir le terminal\n' +
         '`/stop` - Arrêter Claude\n' +
         '`/help` - Cette aide\n\n' +
         '💡 Envoie un message pour parler à Claude.', { parse_mode: 'Markdown' });
@@ -143,6 +152,26 @@ function handleConfig(msg, ctx) {
     }
     else {
         bot.sendMessage(msg.chat.id, '❌ *Non autorisé*\n\n' + 'Ce bot est déjà configuré pour un autre utilisateur.', { parse_mode: 'Markdown' });
+    }
+}
+// /screen
+function handleScreen(msg, ctx) {
+    const { bot, state } = ctx;
+    if (!(0, utils_1.isAuthorized)(msg.from.id, state.userId))
+        return;
+    if (!(0, tmux_1.tmuxExists)()) {
+        bot.sendMessage(msg.chat.id, '⚠️ Aucune session Claude active.');
+        return;
+    }
+    const content = (0, tmux_1.tmuxRead)();
+    if (!content.trim()) {
+        bot.sendMessage(msg.chat.id, '⚠️ Terminal vide.');
+        return;
+    }
+    // Send as code block, split if too long for Telegram
+    const formatted = '```\n' + content + '\n```';
+    for (const chunk of (0, utils_2.splitMessage)(formatted)) {
+        bot.sendMessage(msg.chat.id, chunk, { parse_mode: 'Markdown' });
     }
 }
 // Message handler
