@@ -4,6 +4,13 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.2.1] - 2026-02-07
+
+### Corrigé
+- Ordre des messages Telegram : les réponses de Claude sont envoyées avant les prompts interactifs (permissions, Plan Mode, AskUserQuestion)
+
+---
+
 ## [1.2.0] - 2026-02-07
 
 ### Ajouté
