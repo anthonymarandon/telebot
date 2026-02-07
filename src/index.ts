@@ -120,6 +120,27 @@ async function main(): Promise<void> {
 
   bot.on('message', msg => handleMessage(msg, ctx));
 
+  // Send pending responses to Telegram
+  async function flushResponses(content: string): Promise<void> {
+    if (monitoring.processed) return;
+    monitoring.processed = true;
+
+    const responses = extractResponses(content);
+    for (const resp of responses) {
+      const normalized = normalizeForComparison(resp);
+      if (resp && !state.sentResponses.has(normalized)) {
+        state.sentResponses.add(normalized);
+        for (const chunk of splitMessage(resp)) {
+          try {
+            await bot.sendMessage(state.chatId!, chunk);
+          } catch (e) {
+            console.error('Erreur envoi:', (e as Error).message);
+          }
+        }
+      }
+    }
+  }
+
   // Monitoring loop
   setInterval(async () => {
     try {
@@ -142,6 +163,7 @@ async function main(): Promise<void> {
       if (!state.isYoloMode) {
         const perm = detectPermission(current);
         if (perm && state.lastPermHash === null) {
+          await flushResponses(current);
           state.lastPermHash = 'sent';
           const ctxBlock = perm.context ? `\`\`\`\n${perm.context}\n\`\`\`\n\n` : '';
           bot.sendMessage(
@@ -155,7 +177,6 @@ async function main(): Promise<void> {
             { parse_mode: 'Markdown' }
           );
         } else if (!perm && state.lastPermHash !== null) {
-          // Permission dialog gone (user responded) - reset for next one
           state.lastPermHash = null;
         }
       }
@@ -163,6 +184,7 @@ async function main(): Promise<void> {
       // Plan Mode detection
       const planStatus = detectPlanMode(current);
       if (planStatus === 'entered' && !state.inPlanMode) {
+        await flushResponses(current);
         state.inPlanMode = true;
         bot.sendMessage(
           state.chatId!,
@@ -178,13 +200,12 @@ async function main(): Promise<void> {
           '✅ *Mode Plan terminé*\n\nClaude reprend l\'exécution.',
           { parse_mode: 'Markdown' }
         );
-      } else if (planStatus === null && state.inPlanMode) {
-        // Plan mode indicators no longer visible (scrolled away) - keep state
       }
 
       // AskUserQuestion detection
       const askQuestion = detectAskUserQuestion(current);
       if (askQuestion && state.lastAskQuestion === null) {
+        await flushResponses(current);
         state.lastAskQuestion = askQuestion;
 
         let optionsText = askQuestion.options
@@ -206,7 +227,6 @@ async function main(): Promise<void> {
           { parse_mode: 'Markdown' }
         );
       } else if (!askQuestion && state.lastAskQuestion !== null) {
-        // Question answered/dismissed - reset
         state.lastAskQuestion = null;
       }
 
@@ -228,28 +248,7 @@ async function main(): Promise<void> {
 
       // Stable = process responses
       if (monitoring.stable === STABILITY && !monitoring.processed) {
-        monitoring.processed = true;
-
-        const responses = extractResponses(current);
-        if (responses.length === 0 && current.length > 50) {
-          const hasMarker = current.includes('⏺');
-          const hasPrompt = current.includes('❯');
-          console.log(`[monitoring] Contenu stable (${current.length} chars), 0 réponses extraites. Marqueur ⏺: ${hasMarker}, Prompt ❯: ${hasPrompt}`);
-        }
-
-        for (const resp of responses) {
-          const normalized = normalizeForComparison(resp);
-          if (resp && !state.sentResponses.has(normalized)) {
-            state.sentResponses.add(normalized);
-            for (const chunk of splitMessage(resp)) {
-              try {
-                await bot.sendMessage(state.chatId!, chunk);
-              } catch (e) {
-                console.error('Erreur envoi:', (e as Error).message);
-              }
-            }
-          }
-        }
+        await flushResponses(current);
       }
     } catch (err) {
       console.error('Erreur monitoring:', (err as Error).message);

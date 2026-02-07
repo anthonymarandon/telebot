@@ -99,6 +99,27 @@ async function main() {
     bot.onText(/\/help/, msg => (0, commands_1.handleHelp)(msg, ctx));
     bot.onText(/\/config/, msg => (0, commands_1.handleConfig)(msg, ctx));
     bot.on('message', msg => (0, commands_1.handleMessage)(msg, ctx));
+    // Send pending responses to Telegram
+    async function flushResponses(content) {
+        if (monitoring.processed)
+            return;
+        monitoring.processed = true;
+        const responses = (0, parser_1.extractResponses)(content);
+        for (const resp of responses) {
+            const normalized = (0, utils_1.normalizeForComparison)(resp);
+            if (resp && !state.sentResponses.has(normalized)) {
+                state.sentResponses.add(normalized);
+                for (const chunk of (0, utils_1.splitMessage)(resp)) {
+                    try {
+                        await bot.sendMessage(state.chatId, chunk);
+                    }
+                    catch (e) {
+                        console.error('Erreur envoi:', e.message);
+                    }
+                }
+            }
+        }
+    }
     // Monitoring loop
     setInterval(async () => {
         try {
@@ -118,6 +139,7 @@ async function main() {
             if (!state.isYoloMode) {
                 const perm = (0, parser_1.detectPermission)(current);
                 if (perm && state.lastPermHash === null) {
+                    await flushResponses(current);
                     state.lastPermHash = 'sent';
                     const ctxBlock = perm.context ? `\`\`\`\n${perm.context}\n\`\`\`\n\n` : '';
                     bot.sendMessage(state.chatId, '🔐 *Autorisation requise*\n\n' +
@@ -128,13 +150,13 @@ async function main() {
                         '`3` → Non', { parse_mode: 'Markdown' });
                 }
                 else if (!perm && state.lastPermHash !== null) {
-                    // Permission dialog gone (user responded) - reset for next one
                     state.lastPermHash = null;
                 }
             }
             // Plan Mode detection
             const planStatus = (0, parser_1.detectPlanMode)(current);
             if (planStatus === 'entered' && !state.inPlanMode) {
+                await flushResponses(current);
                 state.inPlanMode = true;
                 bot.sendMessage(state.chatId, '📋 *Mode Plan activé*\n\n' +
                     'Claude explore et conçoit une approche d\'implémentation.\n' +
@@ -144,12 +166,10 @@ async function main() {
                 state.inPlanMode = false;
                 bot.sendMessage(state.chatId, '✅ *Mode Plan terminé*\n\nClaude reprend l\'exécution.', { parse_mode: 'Markdown' });
             }
-            else if (planStatus === null && state.inPlanMode) {
-                // Plan mode indicators no longer visible (scrolled away) - keep state
-            }
             // AskUserQuestion detection
             const askQuestion = (0, parser_1.detectAskUserQuestion)(current);
             if (askQuestion && state.lastAskQuestion === null) {
+                await flushResponses(current);
                 state.lastAskQuestion = askQuestion;
                 let optionsText = askQuestion.options
                     .map(o => {
@@ -165,7 +185,6 @@ async function main() {
                     `${optionsText}${freeText}`, { parse_mode: 'Markdown' });
             }
             else if (!askQuestion && state.lastAskQuestion !== null) {
-                // Question answered/dismissed - reset
                 state.lastAskQuestion = null;
             }
             // Content changed
@@ -183,27 +202,7 @@ async function main() {
             monitoring.stable++;
             // Stable = process responses
             if (monitoring.stable === STABILITY && !monitoring.processed) {
-                monitoring.processed = true;
-                const responses = (0, parser_1.extractResponses)(current);
-                if (responses.length === 0 && current.length > 50) {
-                    const hasMarker = current.includes('⏺');
-                    const hasPrompt = current.includes('❯');
-                    console.log(`[monitoring] Contenu stable (${current.length} chars), 0 réponses extraites. Marqueur ⏺: ${hasMarker}, Prompt ❯: ${hasPrompt}`);
-                }
-                for (const resp of responses) {
-                    const normalized = (0, utils_1.normalizeForComparison)(resp);
-                    if (resp && !state.sentResponses.has(normalized)) {
-                        state.sentResponses.add(normalized);
-                        for (const chunk of (0, utils_1.splitMessage)(resp)) {
-                            try {
-                                await bot.sendMessage(state.chatId, chunk);
-                            }
-                            catch (e) {
-                                console.error('Erreur envoi:', e.message);
-                            }
-                        }
-                    }
-                }
+                await flushResponses(current);
             }
         }
         catch (err) {
