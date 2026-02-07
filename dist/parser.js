@@ -9,6 +9,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.detectState = detectState;
 exports.detectPlanChange = detectPlanChange;
 exports.trimTerminalChrome = trimTerminalChrome;
+exports.trimTrailingDialog = trimTrailingDialog;
 exports.extractPermission = extractPermission;
 exports.extractAskQuestion = extractAskQuestion;
 // Prompt marker: Claude is idle and waiting for input
@@ -78,6 +79,60 @@ function trimTerminalChrome(lines) {
         }
     }
     return result;
+}
+// ===== INTERACTIVE DIALOG TRIMMING =====
+/**
+ * Remove trailing interactive dialog (permission or ask) from diff lines.
+ * Prevents sending raw dialog content that duplicates formatted messages.
+ */
+function trimTrailingDialog(lines) {
+    // Check for permission dialog
+    let permIdx = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+        const t = lines[i].trim();
+        if (t.includes('Do you want to proceed?') ||
+            t.includes('want to run') ||
+            /\(y\/n\)/i.test(t)) {
+            permIdx = i;
+            break;
+        }
+    }
+    if (permIdx !== -1) {
+        // Scan backwards from permIdx past dialog content to find separator block
+        let cutIdx = -1;
+        let inSeparators = false;
+        for (let i = permIdx - 1; i >= 0; i--) {
+            const t = lines[i].trim();
+            if (/^[─━═]+$/.test(t)) {
+                cutIdx = i;
+                inSeparators = true;
+            }
+            else if (inSeparators) {
+                break; // Past the separator block, found the boundary
+            }
+            // else: dialog content between question and separators, keep scanning
+        }
+        if (cutIdx !== -1) {
+            return lines.slice(0, cutIdx);
+        }
+    }
+    // Check for asking dialog
+    let askFooterIdx = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].includes('Enter to select') && lines[i].includes('to navigate')) {
+            askFooterIdx = i;
+            break;
+        }
+    }
+    if (askFooterIdx !== -1) {
+        // Find ☐ header backwards from footer
+        for (let i = askFooterIdx - 1; i >= 0; i--) {
+            if (/☐/.test(lines[i])) {
+                return lines.slice(0, i);
+            }
+        }
+    }
+    return lines;
 }
 function isPermissionDialog(text) {
     const clean = text.replace(SPINNER_CHARS, '');

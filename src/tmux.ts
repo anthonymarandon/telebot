@@ -96,7 +96,7 @@ export function tmuxSelectOption(targetOption: number, cursorPos: number): void 
 
 export function tmuxRead(): string {
   try {
-    const output = execSync(`tmux capture-pane -t ${TMUX_SESSION} -p -S -100`, {
+    const output = execSync(`tmux capture-pane -t ${TMUX_SESSION} -p -S -`, {
       encoding: 'utf8',
     });
     return stripAnsi(output);

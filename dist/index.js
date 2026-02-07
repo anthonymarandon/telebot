@@ -120,6 +120,10 @@ async function main() {
             while (currentLines.length > 0 && currentLines[currentLines.length - 1].trim() === '') {
                 currentLines.pop();
             }
+            // --- Safety: reset processedIndex if buffer shifted ---
+            if (monitoring.processedIndex > currentLines.length) {
+                monitoring.processedIndex = currentLines.length;
+            }
             // --- Initial sync: mark all existing content as already processed ---
             if (!monitoring.synced) {
                 monitoring.lastLines = currentLines;
@@ -222,7 +226,10 @@ async function main() {
 }
 /**
  * Send new terminal lines as HTML <pre> blocks.
- * Trims terminal chrome (separators, empty prompt, hints) from the end.
+ * Applies 3 levels of trimming:
+ * 1. Terminal chrome (trailing separators, empty prompt, hints)
+ * 2. Interactive dialogs (permission/asking - sent via formatted messages instead)
+ * 3. User prompt echoes (leading ❯ lines - user already knows what they typed)
  */
 async function flushScreenDiff(currentLines, monitoring, state, bot) {
     if (monitoring.flushed)
@@ -234,8 +241,14 @@ async function flushScreenDiff(currentLines, monitoring, state, bot) {
         monitoring.processedIndex = currentLines.length;
         return;
     }
-    // Trim terminal chrome from end
-    const trimmed = (0, parser_1.trimTerminalChrome)(newLines);
+    // 1. Trim terminal chrome from end
+    let trimmed = (0, parser_1.trimTerminalChrome)(newLines);
+    // 2. Trim trailing interactive dialog (permission/asking)
+    trimmed = (0, parser_1.trimTrailingDialog)(trimmed);
+    // 3. Trim user prompt echoes from the beginning (❯ followed by text)
+    while (trimmed.length > 0 && /^\s*❯\s+./.test(trimmed[0])) {
+        trimmed.shift();
+    }
     if (trimmed.length === 0) {
         monitoring.processedIndex = currentLines.length;
         return;

@@ -98,7 +98,7 @@ function tmuxSelectOption(targetOption, cursorPos) {
 }
 function tmuxRead() {
     try {
-        const output = (0, child_process_1.execSync)(`tmux capture-pane -t ${exports.TMUX_SESSION} -p -S -100`, {
+        const output = (0, child_process_1.execSync)(`tmux capture-pane -t ${exports.TMUX_SESSION} -p -S -`, {
             encoding: 'utf8',
         });
         return (0, utils_1.stripAnsi)(output);

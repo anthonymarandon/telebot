@@ -4,6 +4,19 @@ Toutes les modifications notables de Telebot sont documentées ici.
 
 ---
 
+## [1.4.1] - 2026-02-07
+
+### Corrigé
+- Doublon permission : le dialogue de permission n'est plus envoyé en double (raw + formaté)
+- Contenu tronqué : capture de tout le scrollback tmux (`-S -` au lieu de `-S -100`)
+- Echo utilisateur : les lignes `❯ message` ne sont plus renvoyées dans le diff
+
+### Ajouté
+- `trimTrailingDialog()` : supprime les dialogues interactifs (permission/asking) du diff terminal
+- Sécurité : reset de `processedIndex` si le buffer tmux a shifté
+
+---
+
 ## [1.4.0] - 2026-02-07
 
 ### Modifié
